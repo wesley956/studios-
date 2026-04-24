@@ -16,10 +16,14 @@ export async function createFirstAdmin(formData: FormData): Promise<void> {
   const supabase = await createClient();
   const admin = createAdminClient();
 
-  const { count } = await supabase
+  const { count, error: countError } = await supabase
     .from('profiles')
     .select('*', { count: 'exact', head: true })
     .eq('role', 'admin');
+
+  if (countError) {
+    throw new Error(countError.message);
+  }
 
   if ((count || 0) > 0) {
     throw new Error('Já existe um administrador cadastrado.');
@@ -28,14 +32,17 @@ export async function createFirstAdmin(formData: FormData): Promise<void> {
   const { data, error } = await admin.auth.admin.createUser({
     email,
     password,
-    email_confirm: true
+    email_confirm: true,
+    user_metadata: {
+      full_name: fullName
+    }
   });
 
   if (error || !data.user) {
     throw new Error(error?.message || 'Não foi possível criar o admin.');
   }
 
-  const { error: profileError } = await supabase.from('profiles').insert({
+  const { error: profileError } = await admin.from('profiles').insert({
     id: data.user.id,
     email,
     full_name: fullName,
@@ -43,6 +50,7 @@ export async function createFirstAdmin(formData: FormData): Promise<void> {
   });
 
   if (profileError) {
+    await admin.auth.admin.deleteUser(data.user.id);
     throw new Error(profileError.message);
   }
 
