@@ -89,7 +89,7 @@ export function parseMoney(value: FormDataEntryValue | string | null | undefined
 }
 
 export function sumValues(values: Array<number | string | null | undefined>) {
-  return values.reduce((acc, value) => acc + Number(value || 0), 0);
+  return values.reduce<number>((acc, value) => acc + Number(value || 0), 0);
 }
 
 export function clamp(value: number, min: number, max: number) {
