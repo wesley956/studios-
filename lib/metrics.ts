@@ -9,6 +9,7 @@ function toIsoDateTime(date: Date) {
 export async function getClientDashboardMetrics() {
   const business = await getCurrentBusiness();
   const supabase = await createClient();
+
   const monthStart = toIsoDateTime(getStartOfMonth());
   const monthEnd = toIsoDateTime(getEndOfMonth());
   const dayStart = toIsoDateTime(getStartOfDay());
@@ -30,25 +31,68 @@ export async function getClientDashboardMetrics() {
     supabase.from('services').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
     supabase.from('customers').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
     supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('business_id', business.id),
-    supabase.from('payments').select('final_amount').eq('business_id', business.id).eq('payment_status', 'paid').gte('paid_at', dayStart).lte('paid_at', dayEnd),
-    supabase.from('payments').select('final_amount').eq('business_id', business.id).eq('payment_status', 'paid').gte('paid_at', monthStart).lte('paid_at', monthEnd),
-    supabase.from('appointments').select('id, final_price').eq('business_id', business.id).eq('status', 'completed').gte('completed_at', monthStart).lte('completed_at', monthEnd),
-    supabase.from('appointments').select('service_id, services(name)').eq('business_id', business.id).eq('status', 'completed').gte('completed_at', monthStart).lte('completed_at', monthEnd),
-    supabase.from('payments').select('id, final_amount, payment_method, paid_at, customers(full_name), services(name)').eq('business_id', business.id).order('paid_at', { ascending: false }).limit(5),
-    supabase.from('appointments').select('id, appointment_date, appointment_time, status, customers(full_name), services(name), final_price').eq('business_id', business.id).in('status', ['confirmed', 'completed']).order('appointment_date', { ascending: true }).order('appointment_time', { ascending: true }).limit(6)
+    supabase
+      .from('payments')
+      .select('amount')
+      .eq('business_id', business.id)
+      .in('payment_status', ['paid', 'partial'])
+      .gt('amount', 0)
+      .gte('paid_at', dayStart)
+      .lte('paid_at', dayEnd),
+    supabase
+      .from('payments')
+      .select('amount')
+      .eq('business_id', business.id)
+      .in('payment_status', ['paid', 'partial'])
+      .gt('amount', 0)
+      .gte('paid_at', monthStart)
+      .lte('paid_at', monthEnd),
+    supabase
+      .from('appointments')
+      .select('id, final_price')
+      .eq('business_id', business.id)
+      .eq('status', 'completed')
+      .gte('completed_at', monthStart)
+      .lte('completed_at', monthEnd),
+    supabase
+      .from('appointments')
+      .select('service_id, services(name)')
+      .eq('business_id', business.id)
+      .eq('status', 'completed')
+      .gte('completed_at', monthStart)
+      .lte('completed_at', monthEnd),
+    supabase
+      .from('payments')
+      .select('id, amount, final_amount, payment_method, payment_status, paid_at, customers(full_name), services(name)')
+      .eq('business_id', business.id)
+      .gt('amount', 0)
+      .order('paid_at', { ascending: false })
+      .limit(5),
+    supabase
+      .from('appointments')
+      .select('id, appointment_date, appointment_time, status, customers(full_name), services(name), final_price')
+      .eq('business_id', business.id)
+      .in('status', ['confirmed', 'completed'])
+      .order('appointment_date', { ascending: true })
+      .order('appointment_time', { ascending: true })
+      .limit(6)
   ]);
 
-  const receivedToday = (todayPayments || []).reduce((sum, item) => sum + Number(item.final_amount || 0), 0);
-  const receivedMonth = (monthPayments || []).reduce((sum, item) => sum + Number(item.final_amount || 0), 0);
+  const receivedToday = (todayPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
+  const receivedMonth = (monthPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
+
   const completedMonth = completedMonthAppointments || [];
   const ticketAverage = completedMonth.length
-    ? completedMonth.reduce((sum, item) => sum + Number(item.final_price || 0), 0) / completedMonth.length
+    ? completedMonth.reduce<number>((sum, item) => sum + Number(item.final_price || 0), 0) / completedMonth.length
     : 0;
 
   const serviceMap = new Map<string, { name: string; count: number }>();
   (serviceUsage || []).forEach((item) => {
     const key = item.service_id || 'unknown';
-    const current = serviceMap.get(key) || { name: (item.services as { name?: string } | null)?.name || 'Sem serviço', count: 0 };
+    const current = serviceMap.get(key) || {
+      name: (item.services as { name?: string } | null)?.name || 'Sem serviço',
+      count: 0
+    };
     current.count += 1;
     serviceMap.set(key, current);
   });
@@ -76,6 +120,7 @@ export async function getClientDashboardMetrics() {
 
 export async function getAdminDashboardMetrics() {
   const supabase = await createClient();
+
   const monthStart = toIsoDateTime(getStartOfMonth());
   const monthEnd = toIsoDateTime(getEndOfMonth());
   const dayStart = toIsoDateTime(getStartOfDay());
@@ -98,18 +143,35 @@ export async function getAdminDashboardMetrics() {
     supabase.from('businesses').select('*', { count: 'exact', head: true }).eq('status', 'active'),
     supabase.from('businesses').select('*', { count: 'exact', head: true }).eq('status', 'blocked'),
     supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'client_owner'),
-    supabase.from('payments').select('final_amount').eq('payment_status', 'paid').gte('paid_at', monthStart).lte('paid_at', monthEnd),
-    supabase.from('payments').select('final_amount').eq('payment_status', 'paid').gte('paid_at', dayStart).lte('paid_at', dayEnd),
+    supabase
+      .from('payments')
+      .select('amount')
+      .in('payment_status', ['paid', 'partial'])
+      .gt('amount', 0)
+      .gte('paid_at', monthStart)
+      .lte('paid_at', monthEnd),
+    supabase
+      .from('payments')
+      .select('amount')
+      .in('payment_status', ['paid', 'partial'])
+      .gt('amount', 0)
+      .gte('paid_at', dayStart)
+      .lte('paid_at', dayEnd),
     supabase.from('businesses').select('id, business_name, slug, city, status, plan_name, created_at').order('created_at', { ascending: false }).limit(6),
     supabase.from('businesses').select('id, business_name, status, plan_name, created_at, profiles:owner_id(full_name,email)').limit(100),
-    supabase.from('payments').select('business_id, final_amount').eq('payment_status', 'paid')
+    supabase
+      .from('payments')
+      .select('business_id, amount')
+      .in('payment_status', ['paid', 'partial'])
+      .gt('amount', 0)
   ]);
 
-  const monthlyRevenue = (monthPayments || []).reduce((sum, item) => sum + Number(item.final_amount || 0), 0);
-  const dailyRevenue = (dayPayments || []).reduce((sum, item) => sum + Number(item.final_amount || 0), 0);
+  const monthlyRevenue = (monthPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
+  const dailyRevenue = (dayPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
+
   const revenueMap = new Map<string, number>();
   (paymentsByBusiness || []).forEach((item) => {
-    revenueMap.set(item.business_id, (revenueMap.get(item.business_id) || 0) + Number(item.final_amount || 0));
+    revenueMap.set(item.business_id, (revenueMap.get(item.business_id) || 0) + Number(item.amount || 0));
   });
 
   const topBusinesses = (businesses || [])
