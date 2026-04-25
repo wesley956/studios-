@@ -8,6 +8,7 @@ import { parseMoney } from '@/lib/utils';
 
 async function getBusinessContext(businessId: string, date: string) {
   const supabase = await createClient();
+
   const [{ data: appointments }, { data: businessHours }] = await Promise.all([
     supabase
       .from('appointments')
@@ -17,13 +18,20 @@ async function getBusinessContext(businessId: string, date: string) {
     supabase.from('business_hours').select('*').eq('business_id', businessId)
   ]);
 
-  return { supabase, appointments: appointments || [], businessHours: businessHours || [] };
+  return {
+    supabase,
+    appointments: appointments || [],
+    businessHours: businessHours || []
+  };
 }
 
 export async function approveBookingRequest(formData: FormData): Promise<void> {
   const business = await getCurrentBusiness();
   const requestId = String(formData.get('requestId') || '');
-  if (!requestId) throw new Error('Solicitação inválida.');
+
+  if (!requestId) {
+    throw new Error('Solicitação inválida.');
+  }
 
   const supabase = await createClient();
   const { data: request, error: requestError } = await supabase
@@ -33,7 +41,9 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
     .eq('business_id', business.id)
     .single();
 
-  if (requestError || !request) throw new Error('Solicitação não encontrada.');
+  if (requestError || !request) {
+    throw new Error('Solicitação não encontrada.');
+  }
 
   const { data: service } = await supabase
     .from('services')
@@ -59,6 +69,7 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
   }
 
   let customerId: string | null = null;
+
   const { data: existingCustomer } = await supabase
     .from('customers')
     .select('id')
@@ -79,7 +90,10 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
       .select('id')
       .single();
 
-    if (customerError || !newCustomer) throw new Error('Não foi possível criar a cliente.');
+    if (customerError || !newCustomer) {
+      throw new Error('Não foi possível criar a cliente.');
+    }
+
     customerId = newCustomer.id;
   }
 
@@ -103,7 +117,9 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
     .select('id')
     .single();
 
-  if (appointmentError || !appointment) throw new Error(appointmentError?.message || 'Não foi possível criar o agendamento.');
+  if (appointmentError || !appointment) {
+    throw new Error(appointmentError?.message || 'Não foi possível criar o agendamento.');
+  }
 
   const { error: updateError } = await supabase
     .from('booking_requests')
@@ -115,7 +131,9 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
     })
     .eq('id', request.id);
 
-  if (updateError) throw new Error(updateError.message);
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
 
   revalidatePath('/app/solicitacoes');
   revalidatePath('/app/agenda');
@@ -125,16 +143,24 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
 export async function cancelBookingRequest(formData: FormData): Promise<void> {
   const business = await getCurrentBusiness();
   const requestId = String(formData.get('requestId') || '');
-  if (!requestId) throw new Error('Solicitação inválida.');
+
+  if (!requestId) {
+    throw new Error('Solicitação inválida.');
+  }
 
   const supabase = await createClient();
   const { error } = await supabase
     .from('booking_requests')
-    .update({ status: 'cancelled', reviewed_at: new Date().toISOString() })
+    .update({
+      status: 'cancelled',
+      reviewed_at: new Date().toISOString()
+    })
     .eq('id', requestId)
     .eq('business_id', business.id);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw new Error(error.message);
+  }
 
   revalidatePath('/app/solicitacoes');
   revalidatePath('/app');
@@ -157,38 +183,71 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
     .eq('business_id', business.id)
     .single();
 
-  if (appointmentError || !appointment) throw new Error('Agendamento não encontrado.');
+  if (appointmentError || !appointment) {
+    throw new Error('Agendamento não encontrado.');
+  }
+
+  const { data: existingPayment } = await supabase
+    .from('payments')
+    .select('id, paid_at')
+    .eq('appointment_id', appointment.id)
+    .maybeSingle();
 
   const nextDate = String(formData.get('appointmentDate') || appointment.appointment_date);
   const nextTime = String(formData.get('appointmentTime') || appointment.appointment_time).slice(0, 5);
   const durationMinutes = Number(appointment.duration_minutes || appointment.services?.duration_minutes || 60);
   const endTime = calculateEndTime(nextTime, durationMinutes);
-  const finalPrice = parseMoney(formData.get('finalPrice')) || Number(appointment.final_price || appointment.services?.price || 0);
-  const paidAmount = parseMoney(formData.get('paidAmount')) || (status === 'completed' ? finalPrice : Number(appointment.paid_amount || 0));
-  const paymentMethod = String(formData.get('paymentMethod') || appointment.payment_method || '') || null;
-  const cancellationReason = String(formData.get('cancellationReason') || appointment.cancellation_reason || '') || null;
-  const notes = String(formData.get('notes') || appointment.notes || '') || null;
+
+  const basePrice = Number(appointment.services?.price || appointment.final_price || 0);
+  const finalPriceField = String(formData.get('finalPrice') || '').trim();
+  const paidAmountField = String(formData.get('paidAmount') || '').trim();
+
+  const finalPrice = finalPriceField !== ''
+    ? parseMoney(finalPriceField)
+    : Number(appointment.final_price || basePrice);
+
+  const paidAmount = paidAmountField !== ''
+    ? parseMoney(paidAmountField)
+    : status === 'completed'
+      ? finalPrice
+      : Number(appointment.paid_amount || 0);
+
+  const paymentMethod = String(formData.get('paymentMethod') || appointment.payment_method || '').trim() || null;
+  const cancellationReason = String(formData.get('cancellationReason') || appointment.cancellation_reason || '').trim() || null;
+  const notes = String(formData.get('notes') || appointment.notes || '').trim() || null;
 
   if (status === 'confirmed') {
     const { appointments, businessHours } = await getBusinessContext(business.id, nextDate);
+
     if (!isWithinBusinessHours({ date: nextDate, time: nextTime, durationMinutes, hours: businessHours })) {
       throw new Error('O horário informado está fora do funcionamento.');
     }
 
-    if (appointmentsOverlap({ date: nextDate, startTime: nextTime, endTime, appointments, ignoreAppointmentId: appointment.id })) {
+    if (
+      appointmentsOverlap({
+        date: nextDate,
+        startTime: nextTime,
+        endTime,
+        appointments,
+        ignoreAppointmentId: appointment.id
+      })
+    ) {
       throw new Error('Já existe um agendamento nesse horário.');
     }
   }
 
-  const paymentStatus = status === 'completed'
-    ? paidAmount >= finalPrice
-      ? 'paid'
-      : paidAmount > 0
-        ? 'partial'
-        : 'pending'
-    : status === 'cancelled'
+  const paymentStatus =
+    status === 'cancelled' || status === 'no_show'
       ? 'cancelled'
-      : appointment.payment_status;
+      : paidAmount >= finalPrice && finalPrice > 0
+        ? 'paid'
+        : paidAmount > 0
+          ? 'partial'
+          : 'pending';
+
+  const completedAt = status === 'completed'
+    ? appointment.completed_at || new Date().toISOString()
+    : null;
 
   const updatePayload = {
     appointment_date: nextDate,
@@ -199,7 +258,7 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
     paid_amount: paidAmount,
     payment_status: paymentStatus,
     payment_method: paymentMethod,
-    completed_at: status === 'completed' ? new Date().toISOString() : appointment.completed_at,
+    completed_at: completedAt,
     cancellation_reason: status === 'cancelled' || status === 'no_show' ? cancellationReason : null,
     notes
   };
@@ -210,40 +269,48 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
     .eq('id', appointment.id)
     .eq('business_id', business.id);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw new Error(error.message);
+  }
 
-  if (status === 'completed') {
-    const { data: existingPayment } = await supabase
-      .from('payments')
-      .select('id')
-      .eq('appointment_id', appointment.id)
-      .maybeSingle();
+  const shouldSyncPayment = status === 'completed' || paidAmount > 0 || Boolean(existingPayment?.id);
 
+  if (shouldSyncPayment) {
     const paymentPayload = {
       business_id: business.id,
       appointment_id: appointment.id,
       customer_id: appointment.customer_id,
       service_id: appointment.service_id,
-      amount: Number(appointment.services?.price || finalPrice),
-      discount_amount: Math.max(Number(appointment.services?.price || finalPrice) - finalPrice, 0),
-      additional_amount: Math.max(finalPrice - Number(appointment.services?.price || finalPrice), 0),
+      amount: paidAmount,
+      discount_amount: Math.max(basePrice - finalPrice, 0),
+      additional_amount: Math.max(finalPrice - basePrice, 0),
       final_amount: finalPrice,
       payment_status: paymentStatus,
       payment_method: paymentMethod,
-      paid_at: new Date().toISOString(),
+      paid_at: paidAmount > 0 ? existingPayment?.paid_at || completedAt || new Date().toISOString() : null,
       notes
     };
 
     if (existingPayment?.id) {
-      const { error: paymentUpdateError } = await supabase.from('payments').update(paymentPayload).eq('id', existingPayment.id);
-      if (paymentUpdateError) throw new Error(paymentUpdateError.message);
+      const { error: paymentUpdateError } = await supabase
+        .from('payments')
+        .update(paymentPayload)
+        .eq('id', existingPayment.id);
+
+      if (paymentUpdateError) {
+        throw new Error(paymentUpdateError.message);
+      }
     } else {
       const { error: paymentInsertError } = await supabase.from('payments').insert(paymentPayload);
-      if (paymentInsertError) throw new Error(paymentInsertError.message);
+
+      if (paymentInsertError) {
+        throw new Error(paymentInsertError.message);
+      }
     }
   }
 
   revalidatePath('/app/agenda');
   revalidatePath('/app');
   revalidatePath('/app/financeiro');
+  revalidatePath('/app/clientes');
 }
