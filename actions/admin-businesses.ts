@@ -61,7 +61,7 @@ export async function createBusiness(formData: FormData): Promise<void> {
       finalOwnerId = createdUser.user.id;
       createdAuthUserId = createdUser.user.id;
 
-      const { error: profileError } = await supabase.from('profiles').insert({
+      const { error: profileError } = await admin.from('profiles').insert({
         id: finalOwnerId,
         email: ownerEmail,
         full_name: ownerName,
