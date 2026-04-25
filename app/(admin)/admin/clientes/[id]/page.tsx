@@ -489,8 +489,7 @@ export default async function AdminClienteDetalhePage({
                           {String(item.reference_month).padStart(2, '0')}/{item.reference_year}
                         </p>
                         <p className="mt-1 text-sm text-muted">
-                          Vencimento: {formatDateBR(item.due_date)} • Valor: R${' '}
-                          {item.amount.toFixed(2).replace('.', ',')}
+                          Vencimento: {formatDateBR(item.due_date)} • Valor: R$ {item.amount.toFixed(2).replace('.', ',')}
                         </p>
                       </div>
 
@@ -598,8 +597,7 @@ export default async function AdminClienteDetalhePage({
                         {(item.customers as { full_name?: string } | null)?.full_name || 'Cliente'}
                       </p>
                       <p className="text-sm text-muted">
-                        {(item.services as { name?: string } | null)?.name || 'Serviço'} •{' '}
-                        {formatDateBR(item.appointment_date)} às {item.appointment_time?.slice(0, 5)}
+                        {(item.services as { name?: string } | null)?.name || 'Serviço'} • {formatDateBR(item.appointment_date)} às {item.appointment_time?.slice(0, 5)}
                       </p>
                     </div>
                     <StatusBadge
@@ -631,8 +629,7 @@ export default async function AdminClienteDetalhePage({
                     <div>
                       <p className="font-medium">{item.customer_name || 'Cliente'}</p>
                       <p className="text-sm text-muted">
-                        {item.service_name || 'Serviço'} • {formatDateBR(item.preferred_date)} às{' '}
-                        {item.preferred_time?.slice(0, 5)}
+                        {item.service_name || 'Serviço'} • {formatDateBR(item.preferred_date)} às {item.preferred_time?.slice(0, 5)}
                       </p>
                     </div>
                     <StatusBadge
