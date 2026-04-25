@@ -1,19 +1,33 @@
 import { z } from 'zod';
 
-export const SINGLE_PLAN_KEY = 'unico';
 export const SINGLE_PLAN_LABEL = 'Plano único';
 export const SINGLE_PLAN_PRICE = 69.9;
+export const SINGLE_PLAN_VALUE = 'single';
 
 export const businessSchema = z.object({
   ownerId: z.string().uuid(),
   businessName: z.string().min(2, 'Informe o nome do negócio.'),
-  slug: z.string().min(2, 'Informe um slug válido.'),
-  city: z.string().optional(),
-  whatsapp: z.string().optional(),
-  instagram: z.string().optional(),
-  address: z.string().optional(),
-  description: z.string().optional(),
-  tagline: z.string().optional(),
-  planName: z.string().default(SINGLE_PLAN_KEY),
+  slug: z.string().min(2, 'Informe o slug.'),
+  city: z.string().optional().nullable(),
+  whatsapp: z.string().optional().nullable(),
+  instagram: z.string().optional().nullable(),
+  address: z.string().optional().nullable(),
+  description: z.string().optional().nullable(),
+  businessType: z.enum([
+    'barbearia',
+    'salao',
+    'estetica',
+    'nail_designer',
+    'cilios',
+    'studio_geral'
+  ]),
+  themeKey: z.enum([
+    'barber_dark',
+    'beauty_soft',
+    'lux_gold',
+    'clean_clinic',
+    'modern_neutral'
+  ]),
+  planName: z.literal(SINGLE_PLAN_VALUE).default(SINGLE_PLAN_VALUE),
   status: z.enum(['trial', 'active', 'blocked']).default('trial')
 });
