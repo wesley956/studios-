@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { businessSchema, SINGLE_PLAN_KEY } from '@/lib/validations/business';
+import { getSuggestedThemeByBusinessType } from '@/lib/themes';
 import { slugify } from '@/lib/utils';
 
 function normalizeString(value: FormDataEntryValue | null) {
@@ -16,6 +17,9 @@ export async function createBusiness(formData: FormData): Promise<void> {
   const ownerEmail = normalizeString(formData.get('ownerEmail'));
   const ownerPassword = normalizeString(formData.get('ownerPassword'));
 
+  const businessType = normalizeString(formData.get('businessType')) || 'studio_geral';
+  const themeKey = normalizeString(formData.get('themeKey')) || getSuggestedThemeByBusinessType(businessType);
+
   const parsed = businessSchema.safeParse({
     ownerId: ownerId || '00000000-0000-0000-0000-000000000000',
     businessName: formData.get('businessName'),
@@ -26,6 +30,8 @@ export async function createBusiness(formData: FormData): Promise<void> {
     address: formData.get('address'),
     description: formData.get('description'),
     tagline: formData.get('tagline'),
+    businessType,
+    themeKey,
     planName: SINGLE_PLAN_KEY,
     status: formData.get('status') || 'trial'
   });
@@ -84,6 +90,8 @@ export async function createBusiness(formData: FormData): Promise<void> {
       address: parsed.data.address || null,
       description: parsed.data.description || null,
       tagline: parsed.data.tagline || null,
+      business_type: parsed.data.businessType,
+      theme_key: parsed.data.themeKey,
       plan_name: SINGLE_PLAN_KEY,
       status: parsed.data.status
     });
@@ -106,9 +114,29 @@ export async function createBusiness(formData: FormData): Promise<void> {
 
 export async function updateBusinessAdmin(formData: FormData): Promise<void> {
   const businessId = normalizeString(formData.get('businessId'));
-  if (!businessId) throw new Error('Cliente inválido.');
+
+  if (!businessId) {
+    throw new Error('Cliente inválido.');
+  }
 
   const supabase = await createClient();
+
+  const { data: currentBusiness, error: businessError } = await supabase
+    .from('businesses')
+    .select('id, business_type, theme_key')
+    .eq('id', businessId)
+    .single();
+
+  if (businessError || !currentBusiness) {
+    throw new Error('Cliente não encontrado.');
+  }
+
+  const nextBusinessType = normalizeString(formData.get('businessType')) || currentBusiness.business_type || 'studio_geral';
+  const nextThemeKey =
+    normalizeString(formData.get('themeKey')) ||
+    currentBusiness.theme_key ||
+    getSuggestedThemeByBusinessType(nextBusinessType);
+
   const payload = {
     status: normalizeString(formData.get('status')) || 'trial',
     plan_name: SINGLE_PLAN_KEY,
@@ -119,11 +147,16 @@ export async function updateBusinessAdmin(formData: FormData): Promise<void> {
     address: normalizeString(formData.get('address')) || null,
     tagline: normalizeString(formData.get('tagline')) || null,
     description: normalizeString(formData.get('description')) || null,
-    slug: slugify(normalizeString(formData.get('slug')))
+    slug: slugify(normalizeString(formData.get('slug'))),
+    business_type: nextBusinessType,
+    theme_key: nextThemeKey
   };
 
   const { error } = await supabase.from('businesses').update(payload).eq('id', businessId);
-  if (error) throw new Error(error.message);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 
   revalidatePath('/admin');
   revalidatePath('/admin/clientes');
