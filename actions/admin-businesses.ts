@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { businessSchema } from '@/lib/validations/business';
+import { businessSchema, SINGLE_PLAN_KEY } from '@/lib/validations/business';
 import { slugify } from '@/lib/utils';
 
 function normalizeString(value: FormDataEntryValue | null) {
@@ -25,7 +25,8 @@ export async function createBusiness(formData: FormData): Promise<void> {
     instagram: formData.get('instagram'),
     address: formData.get('address'),
     description: formData.get('description'),
-    planName: formData.get('planName') || 'start',
+    tagline: formData.get('tagline'),
+    planName: SINGLE_PLAN_KEY,
     status: formData.get('status') || 'trial'
   });
 
@@ -82,12 +83,14 @@ export async function createBusiness(formData: FormData): Promise<void> {
       instagram: parsed.data.instagram || null,
       address: parsed.data.address || null,
       description: parsed.data.description || null,
-      tagline: normalizeString(formData.get('tagline')) || null,
-      plan_name: parsed.data.planName,
+      tagline: parsed.data.tagline || null,
+      plan_name: SINGLE_PLAN_KEY,
       status: parsed.data.status
     });
 
-    if (error) throw new Error(error.message);
+    if (error) {
+      throw new Error(error.message);
+    }
   } catch (error) {
     if (createdAuthUserId) {
       await admin.auth.admin.deleteUser(createdAuthUserId);
@@ -97,6 +100,8 @@ export async function createBusiness(formData: FormData): Promise<void> {
 
   revalidatePath('/admin');
   revalidatePath('/admin/clientes');
+  revalidatePath('/admin/financeiro');
+  revalidatePath('/admin/uso');
 }
 
 export async function updateBusinessAdmin(formData: FormData): Promise<void> {
@@ -104,25 +109,25 @@ export async function updateBusinessAdmin(formData: FormData): Promise<void> {
   if (!businessId) throw new Error('Cliente inválido.');
 
   const supabase = await createClient();
-  const { error } = await supabase
-    .from('businesses')
-    .update({
-      status: normalizeString(formData.get('status')) || 'trial',
-      plan_name: normalizeString(formData.get('planName')) || 'start',
-      business_name: normalizeString(formData.get('businessName')) || undefined,
-      city: normalizeString(formData.get('city')) || null,
-      whatsapp: normalizeString(formData.get('whatsapp')) || null,
-      instagram: normalizeString(formData.get('instagram')) || null,
-      address: normalizeString(formData.get('address')) || null,
-      tagline: normalizeString(formData.get('tagline')) || null,
-      description: normalizeString(formData.get('description')) || null,
-      slug: slugify(normalizeString(formData.get('slug')))
-    })
-    .eq('id', businessId);
+  const payload = {
+    status: normalizeString(formData.get('status')) || 'trial',
+    plan_name: SINGLE_PLAN_KEY,
+    business_name: normalizeString(formData.get('businessName')) || undefined,
+    city: normalizeString(formData.get('city')) || null,
+    whatsapp: normalizeString(formData.get('whatsapp')) || null,
+    instagram: normalizeString(formData.get('instagram')) || null,
+    address: normalizeString(formData.get('address')) || null,
+    tagline: normalizeString(formData.get('tagline')) || null,
+    description: normalizeString(formData.get('description')) || null,
+    slug: slugify(normalizeString(formData.get('slug')))
+  };
 
+  const { error } = await supabase.from('businesses').update(payload).eq('id', businessId);
   if (error) throw new Error(error.message);
 
   revalidatePath('/admin');
   revalidatePath('/admin/clientes');
   revalidatePath(`/admin/clientes/${businessId}`);
+  revalidatePath('/admin/financeiro');
+  revalidatePath('/admin/uso');
 }
