@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react';
+
 export type BusinessType =
   | 'barbearia'
   | 'salao'
@@ -40,8 +42,8 @@ export const DEFAULT_THEME_BY_BUSINESS_TYPE: Record<BusinessType, ThemeKey> = {
 };
 
 export function getSuggestedThemeByBusinessType(businessType: string | null | undefined): ThemeKey {
-  const type = (businessType || 'studio_geral') as BusinessType;
-  return DEFAULT_THEME_BY_BUSINESS_TYPE[type] || 'modern_neutral';
+  const normalized = (businessType || 'studio_geral') as BusinessType;
+  return DEFAULT_THEME_BY_BUSINESS_TYPE[normalized] || 'modern_neutral';
 }
 
 export type ThemePalette = {
@@ -121,23 +123,23 @@ export const THEMES: Record<ThemeKey, ThemePalette> = {
 };
 
 export function getThemePalette(themeKey: string | null | undefined): ThemePalette {
-  const key = (themeKey || 'modern_neutral') as ThemeKey;
-  return THEMES[key] || THEMES.modern_neutral;
+  const normalized = (themeKey || 'modern_neutral') as ThemeKey;
+  return THEMES[normalized] || THEMES.modern_neutral;
 }
 
-export function buildThemeStyleVars(themeKey: string | null | undefined) {
+export function buildThemeStyleVars(themeKey: string | null | undefined): CSSProperties {
   const theme = getThemePalette(themeKey);
 
   return {
-    '--theme-bg': theme.bg,
-    '--theme-surface': theme.surface,
-    '--theme-surface-alt': theme.surfaceAlt,
-    '--theme-primary': theme.primary,
-    '--theme-primary-soft': theme.primarySoft,
-    '--theme-accent': theme.accent,
-    '--theme-text': theme.text,
-    '--theme-muted': theme.muted,
-    '--theme-border': theme.border,
-    '--theme-ring': theme.ring
-  } as React.CSSProperties;
+    ['--theme-bg' as string]: theme.bg,
+    ['--theme-surface' as string]: theme.surface,
+    ['--theme-surface-alt' as string]: theme.surfaceAlt,
+    ['--theme-primary' as string]: theme.primary,
+    ['--theme-primary-soft' as string]: theme.primarySoft,
+    ['--theme-accent' as string]: theme.accent,
+    ['--theme-text' as string]: theme.text,
+    ['--theme-muted' as string]: theme.muted,
+    ['--theme-border' as string]: theme.border,
+    ['--theme-ring' as string]: theme.ring
+  };
 }
