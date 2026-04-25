@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { SINGLE_PLAN_PRICE } from '@/lib/validations/business';
 
 const VALID_STATUSES = new Set(['paid', 'pending', 'overdue', 'waived']);
@@ -75,8 +76,40 @@ export async function ensureCurrentMonthSubscription(formData: FormData): Promis
   const dueDate = normalizeString(formData.get('dueDate')) || getDefaultDueDate(month, year);
 
   const supabase = await createClient();
+  const admin = createAdminClient();
 
-  const payload = {
+  const { data: business, error: businessError } = await supabase
+    .from('businesses')
+    .select('id')
+    .eq('id', businessId)
+    .maybeSingle();
+
+  if (businessError) {
+    throw new Error(businessError.message);
+  }
+
+  if (!business) {
+    throw new Error('Cliente não encontrado.');
+  }
+
+  const { data: existing, error: existingError } = await admin
+    .from('platform_subscriptions')
+    .select('id')
+    .eq('business_id', businessId)
+    .eq('reference_month', month)
+    .eq('reference_year', year)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  if (existing?.id) {
+    revalidateAdminPaths(businessId);
+    return;
+  }
+
+  const { error } = await admin.from('platform_subscriptions').insert({
     business_id: businessId,
     reference_month: month,
     reference_year: year,
@@ -85,11 +118,7 @@ export async function ensureCurrentMonthSubscription(formData: FormData): Promis
     due_date: dueDate,
     notes: normalizeString(formData.get('notes')) || null,
     updated_at: new Date().toISOString()
-  };
-
-  const { error } = await supabase
-    .from('platform_subscriptions')
-    .upsert(payload, { onConflict: 'business_id,reference_month,reference_year' });
+  });
 
   if (error) {
     throw new Error(error.message);
@@ -111,7 +140,9 @@ export async function createSubscriptionRecord(formData: FormData): Promise<void
   const amount = parseMoney(formData.get('amount'), SINGLE_PLAN_PRICE);
   const dueDate = normalizeString(formData.get('dueDate')) || getDefaultDueDate(referenceMonth, referenceYear);
   const requestedStatus = normalizeString(formData.get('status')) || 'pending';
-  const status = VALID_STATUSES.has(requestedStatus) ? normalizeStatus(requestedStatus, dueDate) : normalizeStatus('pending', dueDate);
+  const status = VALID_STATUSES.has(requestedStatus)
+    ? normalizeStatus(requestedStatus, dueDate)
+    : normalizeStatus('pending', dueDate);
   const paymentMethod = normalizePaymentMethod(normalizeString(formData.get('paymentMethod')));
   const notes = normalizeString(formData.get('notes')) || null;
 
@@ -120,9 +151,9 @@ export async function createSubscriptionRecord(formData: FormData): Promise<void
       ? normalizeString(formData.get('paidAt')) || new Date().toISOString()
       : null;
 
-  const supabase = await createClient();
+  const admin = createAdminClient();
 
-  const { error } = await supabase.from('platform_subscriptions').insert({
+  const { error } = await admin.from('platform_subscriptions').insert({
     business_id: businessId,
     reference_month: referenceMonth,
     reference_year: referenceYear,
@@ -157,7 +188,9 @@ export async function updateSubscriptionRecord(formData: FormData): Promise<void
   const amount = parseMoney(formData.get('amount'), SINGLE_PLAN_PRICE);
   const dueDate = normalizeString(formData.get('dueDate')) || getDefaultDueDate(referenceMonth, referenceYear);
   const requestedStatus = normalizeString(formData.get('status')) || 'pending';
-  const status = VALID_STATUSES.has(requestedStatus) ? normalizeStatus(requestedStatus, dueDate) : normalizeStatus('pending', dueDate);
+  const status = VALID_STATUSES.has(requestedStatus)
+    ? normalizeStatus(requestedStatus, dueDate)
+    : normalizeStatus('pending', dueDate);
   const paymentMethod = normalizePaymentMethod(normalizeString(formData.get('paymentMethod')));
   const notes = normalizeString(formData.get('notes')) || null;
 
@@ -166,9 +199,9 @@ export async function updateSubscriptionRecord(formData: FormData): Promise<void
       ? normalizeString(formData.get('paidAt')) || new Date().toISOString()
       : null;
 
-  const supabase = await createClient();
+  const admin = createAdminClient();
 
-  const { error } = await supabase
+  const { error } = await admin
     .from('platform_subscriptions')
     .update({
       reference_month: referenceMonth,
@@ -205,9 +238,9 @@ export async function confirmSubscriptionPayment(formData: FormData): Promise<vo
   const paymentMethod = normalizePaymentMethod(normalizeString(formData.get('paymentMethod')) || 'pix');
   const paidAt = normalizeString(formData.get('paidAt')) || new Date().toISOString();
 
-  const supabase = await createClient();
+  const admin = createAdminClient();
 
-  const { error } = await supabase
+  const { error } = await admin
     .from('platform_subscriptions')
     .update({
       amount,
@@ -237,9 +270,9 @@ export async function markSubscriptionPending(formData: FormData): Promise<void>
     throw new Error('Cobrança inválida.');
   }
 
-  const supabase = await createClient();
+  const admin = createAdminClient();
 
-  const { error } = await supabase
+  const { error } = await admin
     .from('platform_subscriptions')
     .update({
       status: normalizeStatus('pending', dueDate),
@@ -268,9 +301,9 @@ export async function deleteSubscriptionRecord(formData: FormData): Promise<void
     throw new Error('Cobrança inválida.');
   }
 
-  const supabase = await createClient();
+  const admin = createAdminClient();
 
-  const { error } = await supabase
+  const { error } = await admin
     .from('platform_subscriptions')
     .delete()
     .eq('id', subscriptionId)
