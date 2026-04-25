@@ -7,6 +7,22 @@ function toIsoDateTime(date: Date) {
   return date.toISOString();
 }
 
+type BusinessRelationOwner = { full_name?: string | null; email?: string | null } | null;
+
+type AdminBusinessBase = {
+  id: string;
+  business_name: string;
+  slug: string;
+  city: string | null;
+  status: string;
+  created_at?: string | null;
+  profiles?: BusinessRelationOwner[] | BusinessRelationOwner;
+};
+
+function unwrapOwner(profiles: AdminBusinessBase['profiles']) {
+  return Array.isArray(profiles) ? profiles[0] || null : profiles || null;
+}
+
 export async function getClientDashboardMetrics() {
   const business = await getCurrentBusiness();
   const supabase = await createClient();
@@ -81,6 +97,7 @@ export async function getClientDashboardMetrics() {
 
   const receivedToday = (todayPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
   const receivedMonth = (monthPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
+
   const completedMonth = completedMonthAppointments || [];
   const ticketAverage = completedMonth.length
     ? completedMonth.reduce<number>((sum, item) => sum + Number(item.final_price || 0), 0) / completedMonth.length
@@ -90,7 +107,7 @@ export async function getClientDashboardMetrics() {
   (serviceUsage || []).forEach((item) => {
     const key = item.service_id || 'unknown';
     const current = serviceMap.get(key) || {
-      name: ((item.services as { name?: string } | null)?.name as string) || 'Sem serviço',
+      name: (item.services as { name?: string } | null)?.name || 'Sem serviço',
       count: 0
     };
     current.count += 1;
@@ -118,22 +135,8 @@ export async function getClientDashboardMetrics() {
   };
 }
 
-type BusinessWithOwner = {
-  id: string;
-  business_name: string;
-  slug?: string | null;
-  status: string;
-  plan_name?: string | null;
-  created_at?: string | null;
-  profiles?: { full_name?: string | null; email?: string | null }[] | { full_name?: string | null; email?: string | null } | null;
-};
-
 export async function getAdminDashboardMetrics() {
   const supabase = await createClient();
-  const monthStart = toIsoDateTime(getStartOfMonth());
-  const monthEnd = toIsoDateTime(getEndOfMonth());
-  const dayStart = toIsoDateTime(getStartOfDay());
-  const dayEnd = toIsoDateTime(getEndOfDay());
 
   const [
     { count: businessesCount },
@@ -141,15 +144,12 @@ export async function getAdminDashboardMetrics() {
     { count: activeCount },
     { count: blockedCount },
     { count: ownersCount },
-    { data: monthPayments },
-    { data: dayPayments },
-    { data: latestBusinesses },
-    { data: businesses },
-    { data: paymentsByBusiness },
-    { data: businessesWithServices },
-    { data: businessesWithRequests },
-    { data: businessesWithAppointments },
-    { data: businessesWithPayments }
+    { data: latestBusinessesRaw },
+    { data: businessesRaw },
+    { data: services },
+    { data: customers },
+    { data: requests },
+    { data: appointments }
   ] = await Promise.all([
     supabase.from('businesses').select('*', { count: 'exact', head: true }),
     supabase.from('businesses').select('*', { count: 'exact', head: true }).eq('status', 'trial'),
@@ -157,57 +157,107 @@ export async function getAdminDashboardMetrics() {
     supabase.from('businesses').select('*', { count: 'exact', head: true }).eq('status', 'blocked'),
     supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'client_owner'),
     supabase
-      .from('payments')
-      .select('amount')
-      .in('payment_status', ['paid', 'partial'])
-      .gt('amount', 0)
-      .gte('paid_at', monthStart)
-      .lte('paid_at', monthEnd),
+      .from('businesses')
+      .select('id, business_name, slug, city, status, created_at, profiles:owner_id(full_name,email)')
+      .order('created_at', { ascending: false })
+      .limit(6),
     supabase
-      .from('payments')
-      .select('amount')
-      .in('payment_status', ['paid', 'partial'])
-      .gt('amount', 0)
-      .gte('paid_at', dayStart)
-      .lte('paid_at', dayEnd),
-    supabase.from('businesses').select('id, business_name, slug, city, status, plan_name, created_at').order('created_at', { ascending: false }).limit(6),
-    supabase.from('businesses').select('id, business_name, status, plan_name, created_at, profiles:owner_id(full_name,email)').limit(200),
-    supabase.from('payments').select('business_id, amount').in('payment_status', ['paid', 'partial']).gt('amount', 0),
+      .from('businesses')
+      .select('id, business_name, slug, city, status, created_at, profiles:owner_id(full_name,email)')
+      .limit(200),
     supabase.from('services').select('business_id'),
-    supabase.from('booking_requests').select('business_id'),
-    supabase.from('appointments').select('business_id'),
-    supabase.from('payments').select('business_id').gt('amount', 0)
+    supabase.from('customers').select('business_id'),
+    supabase.from('booking_requests').select('business_id, status'),
+    supabase.from('appointments').select('business_id, status')
   ]);
 
-  const monthlyRevenue = (monthPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
-  const dailyRevenue = (dayPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
-  const recurringRevenue = Number(activeCount || 0) * SINGLE_PLAN_PRICE;
-  const potentialRevenue = Number((activeCount || 0) + (trialCount || 0)) * SINGLE_PLAN_PRICE;
+  const serviceMap = new Map<string, number>();
+  const customerMap = new Map<string, number>();
+  const requestMap = new Map<string, number>();
+  const pendingRequestMap = new Map<string, number>();
+  const appointmentMap = new Map<string, number>();
+  const completedAppointmentMap = new Map<string, number>();
 
-  const revenueMap = new Map<string, number>();
-  (paymentsByBusiness || []).forEach((item) => {
-    revenueMap.set(item.business_id, (revenueMap.get(item.business_id) || 0) + Number(item.amount || 0));
+  (services || []).forEach((item) => {
+    serviceMap.set(item.business_id, (serviceMap.get(item.business_id) || 0) + 1);
   });
 
-  const list = ((businesses || []) as BusinessWithOwner[]).map((item) => ({
-    id: item.id,
-    business_name: item.business_name,
-    status: item.status,
-    plan_name: item.plan_name || 'unico',
-    owner: Array.isArray(item.profiles) ? item.profiles[0] : item.profiles,
-    revenue: revenueMap.get(item.id) || 0
+  (customers || []).forEach((item) => {
+    customerMap.set(item.business_id, (customerMap.get(item.business_id) || 0) + 1);
+  });
+
+  (requests || []).forEach((item) => {
+    requestMap.set(item.business_id, (requestMap.get(item.business_id) || 0) + 1);
+    if (item.status === 'pending') {
+      pendingRequestMap.set(item.business_id, (pendingRequestMap.get(item.business_id) || 0) + 1);
+    }
+  });
+
+  (appointments || []).forEach((item) => {
+    appointmentMap.set(item.business_id, (appointmentMap.get(item.business_id) || 0) + 1);
+    if (item.status === 'completed') {
+      completedAppointmentMap.set(item.business_id, (completedAppointmentMap.get(item.business_id) || 0) + 1);
+    }
+  });
+
+  const businesses = ((businessesRaw || []) as unknown as AdminBusinessBase[]).map((item) => {
+    const servicesCount = serviceMap.get(item.id) || 0;
+    const customersCount = customerMap.get(item.id) || 0;
+    const requestsCount = requestMap.get(item.id) || 0;
+    const pendingRequests = pendingRequestMap.get(item.id) || 0;
+    const appointmentsCount = appointmentMap.get(item.id) || 0;
+    const completedAppointments = completedAppointmentMap.get(item.id) || 0;
+    const publicReady = Boolean(item.slug) && servicesCount > 0;
+    const owner = unwrapOwner(item.profiles);
+    const activityScore =
+      servicesCount * 2 +
+      customersCount +
+      requestsCount * 3 +
+      appointmentsCount * 4 +
+      completedAppointments * 5 +
+      (item.status === 'active' ? 8 : item.status === 'trial' ? 3 : -4);
+
+    return {
+      ...item,
+      owner,
+      servicesCount,
+      customersCount,
+      requestsCount,
+      pendingRequests,
+      appointmentsCount,
+      completedAppointments,
+      publicReady,
+      activityScore
+    };
+  });
+
+  const latestBusinesses = ((latestBusinessesRaw || []) as unknown as AdminBusinessBase[]).map((item) => ({
+    ...item,
+    owner: unwrapOwner(item.profiles),
+    servicesCount: serviceMap.get(item.id) || 0,
+    appointmentsCount: appointmentMap.get(item.id) || 0,
+    requestsCount: requestMap.get(item.id) || 0,
+    publicReady: Boolean(item.slug) && (serviceMap.get(item.id) || 0) > 0
   }));
 
-  const topBusinesses = [...list].sort((a, b) => b.revenue - a.revenue).slice(0, 5);
-  const inactiveBusinesses = [...list]
-    .filter((item) => item.revenue <= 0)
-    .sort((a, b) => String(a.business_name).localeCompare(String(b.business_name)))
+  const topBusinesses = [...businesses]
+    .sort((a, b) => b.activityScore - a.activityScore)
     .slice(0, 5);
 
-  const uniqueServiceBusinesses = new Set((businessesWithServices || []).map((item) => item.business_id)).size;
-  const uniqueRequestBusinesses = new Set((businessesWithRequests || []).map((item) => item.business_id)).size;
-  const uniqueAppointmentBusinesses = new Set((businessesWithAppointments || []).map((item) => item.business_id)).size;
-  const uniquePaymentBusinesses = new Set((businessesWithPayments || []).map((item) => item.business_id)).size;
+  const inactiveBusinesses = [...businesses]
+    .filter((item) => item.status !== 'blocked' || item.servicesCount === 0 || item.appointmentsCount === 0)
+    .sort((a, b) => a.activityScore - b.activityScore)
+    .slice(0, 5)
+    .map((item) => ({
+      ...item,
+      needsAttention: [
+        item.status === 'blocked' ? 'bloqueado' : null,
+        item.servicesCount === 0 ? 'sem serviços' : null,
+        item.requestsCount === 0 ? 'sem solicitações' : null,
+        item.appointmentsCount === 0 ? 'sem agenda' : null,
+        !item.publicReady ? 'página incompleta' : null
+      ].filter(Boolean)
+    }));
 
   return {
     summary: {
@@ -216,16 +266,15 @@ export async function getAdminDashboardMetrics() {
       activeCount: activeCount || 0,
       blockedCount: blockedCount || 0,
       ownersCount: ownersCount || 0,
-      monthlyRevenue,
-      dailyRevenue,
-      recurringRevenue,
-      potentialRevenue,
-      businessesWithServices: uniqueServiceBusinesses,
-      businessesWithRequests: uniqueRequestBusinesses,
-      businessesWithAppointments: uniqueAppointmentBusinesses,
-      businessesWithPayments: uniquePaymentBusinesses
+      recurringRevenue: Number(activeCount || 0) * SINGLE_PLAN_PRICE,
+      potentialRevenue: Number((activeCount || 0) + (trialCount || 0)) * SINGLE_PLAN_PRICE,
+      businessesWithServices: new Set((services || []).map((item) => item.business_id)).size,
+      businessesWithRequests: new Set((requests || []).map((item) => item.business_id)).size,
+      businessesWithAppointments: new Set((appointments || []).map((item) => item.business_id)).size,
+      publicReadyCount: businesses.filter((item) => item.publicReady).length,
+      inactiveCount: businesses.filter((item) => item.activityScore <= 4).length
     },
-    latestBusinesses: latestBusinesses || [],
+    latestBusinesses,
     inactiveBusinesses,
     topBusinesses
   };
