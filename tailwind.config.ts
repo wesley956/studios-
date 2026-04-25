@@ -5,14 +5,14 @@ export default {
   theme: {
     extend: {
       colors: {
-        background: '#F7F2EC',
-        surface: '#FFFFFF',
-        text: '#2F2623',
-        muted: '#7B6E68',
-        primary: '#B58A6A',
-        'primary-soft': '#EAD8CB',
-        border: '#E7DDD5',
-        dark: '#1E1A18'
+        background: 'var(--theme-bg, var(--background))',
+        surface: 'var(--theme-surface, var(--surface))',
+        text: 'var(--theme-text, var(--text))',
+        muted: 'var(--theme-muted, var(--muted))',
+        primary: 'var(--theme-primary, var(--primary))',
+        'primary-soft': 'var(--theme-primary-soft, var(--primary-soft))',
+        border: 'var(--theme-border, var(--border))',
+        dark: 'var(--theme-accent, var(--dark))'
       },
       borderRadius: {
         xl: '1rem',
@@ -21,6 +21,9 @@ export default {
       fontFamily: {
         sans: ['var(--font-inter)'],
         serif: ['var(--font-playfair)']
+      },
+      boxShadow: {
+        soft: '0 18px 45px -24px rgba(0,0,0,0.18)'
       }
     }
   },
