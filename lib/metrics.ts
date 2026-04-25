@@ -1,6 +1,7 @@
 import { getCurrentBusiness } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { getEndOfDay, getEndOfMonth, getStartOfDay, getStartOfMonth } from '@/lib/utils';
+import { SINGLE_PLAN_PRICE } from '@/lib/validations/business';
 
 function toIsoDateTime(date: Date) {
   return date.toISOString();
@@ -80,7 +81,6 @@ export async function getClientDashboardMetrics() {
 
   const receivedToday = (todayPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
   const receivedMonth = (monthPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
-
   const completedMonth = completedMonthAppointments || [];
   const ticketAverage = completedMonth.length
     ? completedMonth.reduce<number>((sum, item) => sum + Number(item.final_price || 0), 0) / completedMonth.length
@@ -90,7 +90,7 @@ export async function getClientDashboardMetrics() {
   (serviceUsage || []).forEach((item) => {
     const key = item.service_id || 'unknown';
     const current = serviceMap.get(key) || {
-      name: (item.services as { name?: string } | null)?.name || 'Sem serviço',
+      name: ((item.services as { name?: string } | null)?.name as string) || 'Sem serviço',
       count: 0
     };
     current.count += 1;
@@ -118,9 +118,18 @@ export async function getClientDashboardMetrics() {
   };
 }
 
+type BusinessWithOwner = {
+  id: string;
+  business_name: string;
+  slug?: string | null;
+  status: string;
+  plan_name?: string | null;
+  created_at?: string | null;
+  profiles?: { full_name?: string | null; email?: string | null }[] | { full_name?: string | null; email?: string | null } | null;
+};
+
 export async function getAdminDashboardMetrics() {
   const supabase = await createClient();
-
   const monthStart = toIsoDateTime(getStartOfMonth());
   const monthEnd = toIsoDateTime(getEndOfMonth());
   const dayStart = toIsoDateTime(getStartOfDay());
@@ -136,7 +145,11 @@ export async function getAdminDashboardMetrics() {
     { data: dayPayments },
     { data: latestBusinesses },
     { data: businesses },
-    { data: paymentsByBusiness }
+    { data: paymentsByBusiness },
+    { data: businessesWithServices },
+    { data: businessesWithRequests },
+    { data: businessesWithAppointments },
+    { data: businessesWithPayments }
   ] = await Promise.all([
     supabase.from('businesses').select('*', { count: 'exact', head: true }),
     supabase.from('businesses').select('*', { count: 'exact', head: true }).eq('status', 'trial'),
@@ -158,35 +171,43 @@ export async function getAdminDashboardMetrics() {
       .gte('paid_at', dayStart)
       .lte('paid_at', dayEnd),
     supabase.from('businesses').select('id, business_name, slug, city, status, plan_name, created_at').order('created_at', { ascending: false }).limit(6),
-    supabase.from('businesses').select('id, business_name, status, plan_name, created_at, profiles:owner_id(full_name,email)').limit(100),
-    supabase
-      .from('payments')
-      .select('business_id, amount')
-      .in('payment_status', ['paid', 'partial'])
-      .gt('amount', 0)
+    supabase.from('businesses').select('id, business_name, status, plan_name, created_at, profiles:owner_id(full_name,email)').limit(200),
+    supabase.from('payments').select('business_id, amount').in('payment_status', ['paid', 'partial']).gt('amount', 0),
+    supabase.from('services').select('business_id'),
+    supabase.from('booking_requests').select('business_id'),
+    supabase.from('appointments').select('business_id'),
+    supabase.from('payments').select('business_id').gt('amount', 0)
   ]);
 
   const monthlyRevenue = (monthPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
   const dailyRevenue = (dayPayments || []).reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
+  const recurringRevenue = Number(activeCount || 0) * SINGLE_PLAN_PRICE;
+  const potentialRevenue = Number((activeCount || 0) + (trialCount || 0)) * SINGLE_PLAN_PRICE;
 
   const revenueMap = new Map<string, number>();
   (paymentsByBusiness || []).forEach((item) => {
     revenueMap.set(item.business_id, (revenueMap.get(item.business_id) || 0) + Number(item.amount || 0));
   });
 
-  const topBusinesses = (businesses || [])
-    .map((item) => ({
-      id: item.id,
-      business_name: item.business_name,
-      status: item.status,
-      plan_name: item.plan_name,
-      owner: Array.isArray(item.profiles) ? item.profiles[0] : item.profiles,
-      revenue: revenueMap.get(item.id) || 0
-    }))
-    .sort((a, b) => b.revenue - a.revenue)
+  const list = ((businesses || []) as BusinessWithOwner[]).map((item) => ({
+    id: item.id,
+    business_name: item.business_name,
+    status: item.status,
+    plan_name: item.plan_name || 'unico',
+    owner: Array.isArray(item.profiles) ? item.profiles[0] : item.profiles,
+    revenue: revenueMap.get(item.id) || 0
+  }));
+
+  const topBusinesses = [...list].sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+  const inactiveBusinesses = [...list]
+    .filter((item) => item.revenue <= 0)
+    .sort((a, b) => String(a.business_name).localeCompare(String(b.business_name)))
     .slice(0, 5);
 
-  const inactiveBusinesses = [...topBusinesses].sort((a, b) => a.revenue - b.revenue).slice(0, 5);
+  const uniqueServiceBusinesses = new Set((businessesWithServices || []).map((item) => item.business_id)).size;
+  const uniqueRequestBusinesses = new Set((businessesWithRequests || []).map((item) => item.business_id)).size;
+  const uniqueAppointmentBusinesses = new Set((businessesWithAppointments || []).map((item) => item.business_id)).size;
+  const uniquePaymentBusinesses = new Set((businessesWithPayments || []).map((item) => item.business_id)).size;
 
   return {
     summary: {
@@ -196,7 +217,13 @@ export async function getAdminDashboardMetrics() {
       blockedCount: blockedCount || 0,
       ownersCount: ownersCount || 0,
       monthlyRevenue,
-      dailyRevenue
+      dailyRevenue,
+      recurringRevenue,
+      potentialRevenue,
+      businessesWithServices: uniqueServiceBusinesses,
+      businessesWithRequests: uniqueRequestBusinesses,
+      businessesWithAppointments: uniqueAppointmentBusinesses,
+      businessesWithPayments: uniquePaymentBusinesses
     },
     latestBusinesses: latestBusinesses || [],
     inactiveBusinesses,
