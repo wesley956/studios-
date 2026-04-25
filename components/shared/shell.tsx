@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { signOut } from '@/actions/auth';
 import { cn } from '@/lib/utils';
 
@@ -14,69 +14,60 @@ export function SidebarLayout({
   children: ReactNode;
   tone?: 'client' | 'admin';
 }) {
+  const badgeLabel = tone === 'admin' ? 'Painel admin' : 'Painel do studio';
+  const badgeClass =
+    tone === 'admin'
+      ? 'border-sky-200 bg-sky-50 text-sky-800'
+      : 'border-primary/20 bg-primary-soft text-primary';
+
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[280px,1fr]">
-      <aside
-        className={cn(
-          'border-r p-6',
-          tone === 'admin'
-            ? 'border-white/10 bg-dark text-white'
-            : 'border-border bg-[#FBF7F3]'
-        )}
-      >
-        <div className="mb-8 rounded-[1.75rem] border border-white/10 bg-white/5 p-5 md:bg-transparent md:p-0">
-          <p
-            className={cn(
-              'text-xs uppercase tracking-[0.2em]',
-              tone === 'admin' ? 'text-white/60' : 'text-muted'
-            )}
-          >
-            Studio+
-          </p>
-          <h1 className="mt-2 text-2xl font-serif">{title}</h1>
-          <p className={cn('mt-2 text-sm', tone === 'admin' ? 'text-white/70' : 'text-muted')}>
-            Gestão bonita, rápida e pronta para vender.
-          </p>
-        </div>
+    <div className="min-h-screen">
+      <div className="mx-auto grid min-h-screen max-w-[1600px] gap-6 px-4 py-4 lg:grid-cols-[300px,1fr] lg:px-6 lg:py-6">
+        <aside className="rounded-[2rem] border border-border bg-surface p-5 shadow-soft">
+          <div className="rounded-[1.75rem] border border-border bg-[var(--theme-surface-alt)] p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Studio+</p>
+                <h1 className="mt-2 text-2xl font-serif">{title}</h1>
+              </div>
 
-        <nav className="space-y-2">
-          {nav.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'block rounded-2xl px-4 py-3 transition',
-                tone === 'admin'
-                  ? 'bg-white/5 hover:bg-white/10'
-                  : 'bg-white hover:bg-primary-soft'
-              )}
+              <span className={cn('rounded-full border px-3 py-1 text-xs font-semibold', badgeClass)}>
+                {badgeLabel}
+              </span>
+            </div>
+
+            <p className="mt-3 text-sm leading-6 text-muted">
+              Gestão bonita, rápida e pronta para vender.
+            </p>
+          </div>
+
+          <nav className="mt-5 space-y-2">
+            {nav.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="block rounded-[1.5rem] border border-border bg-surface px-4 py-3 transition hover:bg-primary-soft"
+              >
+                <p className="font-medium text-text">{item.label}</p>
+                {item.helper ? <p className="mt-1 text-xs text-muted">{item.helper}</p> : null}
+              </Link>
+            ))}
+          </nav>
+
+          <form action={signOut} className="mt-5">
+            <button
+              type="submit"
+              className="w-full rounded-[1.5rem] border border-border bg-white px-4 py-3 text-sm font-medium transition hover:bg-primary-soft"
             >
-              <p className="text-sm font-medium">{item.label}</p>
-              {item.helper && (
-                <p className={cn('mt-1 text-xs', tone === 'admin' ? 'text-white/60' : 'text-muted')}>
-                  {item.helper}
-                </p>
-              )}
-            </Link>
-          ))}
-        </nav>
+              Sair
+            </button>
+          </form>
+        </aside>
 
-        <form action={signOut} className="mt-8">
-          <button
-            type="submit"
-            className={cn(
-              'w-full rounded-2xl px-4 py-3 text-sm transition',
-              tone === 'admin'
-                ? 'border border-white/15 bg-white/5 text-white hover:bg-white/10'
-                : 'border border-border bg-white hover:bg-primary-soft'
-            )}
-          >
-            Sair
-          </button>
-        </form>
-      </aside>
-
-      <main className="p-6 md:p-8">{children}</main>
+        <main className="rounded-[2rem] border border-border bg-surface p-5 shadow-soft lg:p-7">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
@@ -91,12 +82,13 @@ export function TopHeading({
   action?: ReactNode;
 }) {
   return (
-    <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
       <div>
         <h2 className="text-3xl font-serif md:text-4xl">{title}</h2>
-        {description && <p className="mt-2 max-w-3xl text-muted">{description}</p>}
+        {description ? <p className="mt-3 max-w-3xl text-sm leading-7 text-muted">{description}</p> : null}
       </div>
-      {action}
+
+      {action ? <div className="shrink-0">{action}</div> : null}
     </div>
   );
 }
@@ -112,19 +104,18 @@ export function StatCard({
   hint?: string;
   tone?: 'default' | 'success' | 'warning' | 'dark';
 }) {
+  const toneMap = {
+    default: 'bg-surface',
+    success: 'bg-emerald-50',
+    warning: 'bg-amber-50',
+    dark: 'bg-[var(--theme-surface-alt)]'
+  };
+
   return (
-    <div
-      className={cn(
-        'rounded-[1.5rem] border p-5 shadow-sm',
-        tone === 'default' && 'border-border bg-white',
-        tone === 'success' && 'border-emerald-100 bg-emerald-50',
-        tone === 'warning' && 'border-amber-100 bg-amber-50',
-        tone === 'dark' && 'border-white/10 bg-dark text-white'
-      )}
-    >
-      <p className={cn('text-sm', tone === 'dark' ? 'text-white/70' : 'text-muted')}>{label}</p>
-      <p className="mt-2 text-3xl font-semibold">{value}</p>
-      {hint && <p className={cn('mt-2 text-xs', tone === 'dark' ? 'text-white/60' : 'text-muted')}>{hint}</p>}
+    <div className={cn('rounded-[1.75rem] border border-border p-5 shadow-soft', toneMap[tone])}>
+      <p className="text-sm text-muted">{label}</p>
+      <p className="mt-3 text-3xl font-semibold text-text">{value}</p>
+      {hint ? <p className="mt-2 text-xs leading-5 text-muted">{hint}</p> : null}
     </div>
   );
 }
@@ -139,10 +130,10 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="rounded-[1.5rem] border border-dashed border-border bg-white p-8 text-center shadow-sm">
-      <h3 className="text-xl font-serif">{title}</h3>
-      <p className="mt-2 text-muted">{description}</p>
-      {action && <div className="mt-4">{action}</div>}
+    <div className="rounded-[1.75rem] border border-dashed border-border bg-[var(--theme-surface-alt)] p-8 text-center">
+      <h3 className="text-2xl font-serif">{title}</h3>
+      <p className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-muted">{description}</p>
+      {action ? <div className="mt-5">{action}</div> : null}
     </div>
   );
 }
@@ -161,14 +152,16 @@ export function SectionCard({
   className?: string;
 }) {
   return (
-    <section className={cn('rounded-[1.5rem] border border-border bg-white p-6 shadow-sm', className)}>
-      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+    <section className={cn('rounded-[1.85rem] border border-border bg-surface p-6 shadow-soft', className)}>
+      <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h3 className="text-2xl font-serif">{title}</h3>
-          {description && <p className="mt-1 text-sm text-muted">{description}</p>}
+          {description ? <p className="mt-2 text-sm leading-6 text-muted">{description}</p> : null}
         </div>
-        {action}
+
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
+
       {children}
     </section>
   );
@@ -181,17 +174,16 @@ export function StatusBadge({
   status: 'neutral' | 'success' | 'warning' | 'danger' | 'dark';
   children: ReactNode;
 }) {
+  const toneMap = {
+    neutral: 'border-border bg-white text-text',
+    success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    warning: 'border-amber-200 bg-amber-50 text-amber-800',
+    danger: 'border-red-200 bg-red-50 text-red-700',
+    dark: 'border-slate-200 bg-slate-100 text-slate-800'
+  };
+
   return (
-    <span
-      className={cn(
-        'inline-flex rounded-full px-3 py-1 text-xs font-medium uppercase tracking-[0.15em]',
-        status === 'neutral' && 'bg-primary-soft text-dark',
-        status === 'success' && 'bg-emerald-100 text-emerald-700',
-        status === 'warning' && 'bg-amber-100 text-amber-700',
-        status === 'danger' && 'bg-red-100 text-red-700',
-        status === 'dark' && 'bg-dark text-white'
-      )}
-    >
+    <span className={cn('inline-flex rounded-full border px-3 py-1 text-xs font-semibold', toneMap[status])}>
       {children}
     </span>
   );
