@@ -1,20 +1,30 @@
 import Link from 'next/link';
-import { TopHeading, EmptyState, SectionCard, StatusBadge } from '@/components/shared/shell';
+import { EmptyState, SectionCard, StatusBadge, TopHeading } from '@/components/shared/shell';
 import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
-import { statusLabel, currencyBRL } from '@/lib/utils';
+import { currencyBRL, statusLabel } from '@/lib/utils';
+import { SINGLE_PLAN_LABEL, SINGLE_PLAN_PRICE } from '@/lib/validations/business';
+
+type BusinessRow = {
+  id: string;
+  business_name: string;
+  city: string | null;
+  plan_name: string | null;
+  status: string;
+  slug: string;
+  profiles: { full_name: string | null; email: string | null }[] | { full_name: string | null; email: string | null } | null;
+};
 
 export default async function AdminClientesPage({
   searchParams
 }: {
-  searchParams?: Promise<{ q?: string; status?: string; plan?: string }>;
+  searchParams?: Promise<{ q?: string; status?: string }>;
 }) {
   await requireAdmin();
   const supabase = await createClient();
   const params = searchParams ? await searchParams : undefined;
   const query = params?.q?.trim() || '';
   const selectedStatus = params?.status || '';
-  const selectedPlan = params?.plan || '';
 
   let businessesQuery = supabase
     .from('businesses')
@@ -23,44 +33,56 @@ export default async function AdminClientesPage({
 
   if (query) businessesQuery = businessesQuery.ilike('business_name', `%${query}%`);
   if (selectedStatus) businessesQuery = businessesQuery.eq('status', selectedStatus);
-  if (selectedPlan) businessesQuery = businessesQuery.eq('plan_name', selectedPlan);
 
   const [{ data }, { data: payments }] = await Promise.all([
     businessesQuery,
-    supabase.from('payments').select('business_id, final_amount').eq('payment_status', 'paid')
+    supabase.from('payments').select('business_id, amount').in('payment_status', ['paid', 'partial']).gt('amount', 0)
   ]);
 
   const revenueMap = new Map<string, number>();
   (payments || []).forEach((item) => {
-    revenueMap.set(item.business_id, (revenueMap.get(item.business_id) || 0) + Number(item.final_amount || 0));
+    revenueMap.set(item.business_id, (revenueMap.get(item.business_id) || 0) + Number(item.amount || 0));
   });
 
-  const businesses = data || [];
+  const businesses = (data || []) as unknown as BusinessRow[];
 
   return (
     <div>
-      <TopHeading title="Clientes" description="Encontre rapidamente qualquer studio, filtre por plano e veja quem está gerando mais resultado." action={<Link href="/admin/clientes/novo" className="rounded-2xl bg-white px-5 py-3 text-dark">Novo cliente</Link>} />
+      <TopHeading
+        title="Clientes da plataforma"
+        description="Gerencie sua base com o modelo comercial simplificado: um único plano de R$ 69,90/mês."
+        action={
+          <Link href="/admin/clientes/novo" className="rounded-2xl bg-primary px-5 py-3 text-white transition hover:opacity-90">
+            Novo cliente
+          </Link>
+        }
+      />
 
-      <SectionCard title="Busca e filtros" description="Afine a lista por nome, status ou plano." className="mb-6">
-        <form className="grid gap-4 md:grid-cols-[1fr,220px,220px,160px]">
-          <input name="q" defaultValue={query} placeholder="Buscar por negócio" className="w-full rounded-2xl border border-border bg-white px-4 py-3" />
-          <select name="status" defaultValue={selectedStatus} className="w-full rounded-2xl border border-border bg-white px-4 py-3">
+      <SectionCard title="Filtros" description="Busque negócios pelo nome e concentre a leitura por status.">
+        <form className="grid gap-3 md:grid-cols-[1.4fr,0.8fr,auto]">
+          <input
+            name="q"
+            defaultValue={query}
+            placeholder="Buscar por nome do negócio"
+            className="w-full rounded-2xl border border-border bg-white px-4 py-3 outline-none transition focus:border-primary"
+          />
+          <select
+            name="status"
+            defaultValue={selectedStatus}
+            className="w-full rounded-2xl border border-border bg-white px-4 py-3 outline-none transition focus:border-primary"
+          >
             <option value="">Todos os status</option>
             <option value="trial">Teste</option>
             <option value="active">Ativo</option>
             <option value="blocked">Bloqueado</option>
           </select>
-          <select name="plan" defaultValue={selectedPlan} className="w-full rounded-2xl border border-border bg-white px-4 py-3">
-            <option value="">Todos os planos</option>
-            <option value="start">Start</option>
-            <option value="pro">Pro</option>
-            <option value="premium">Premium</option>
-          </select>
-          <button type="submit" className="rounded-2xl bg-primary px-5 py-3 text-white">Filtrar</button>
+          <button type="submit" className="rounded-2xl border border-border bg-white px-4 py-3 transition hover:bg-primary-soft">
+            Filtrar
+          </button>
         </form>
       </SectionCard>
 
-      <div className="rounded-[1.5rem] border border-white/10 bg-white p-4 shadow-sm">
+      <div className="mt-6 rounded-[1.5rem] border border-border bg-white p-5 shadow-sm">
         {businesses.length ? (
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
@@ -79,24 +101,52 @@ export default async function AdminClientesPage({
                 {businesses.map((item) => {
                   const owner = Array.isArray(item.profiles) ? item.profiles[0] : item.profiles;
                   return (
-                    <tr key={item.id} className="border-t border-border">
-                      <td className="px-4 py-3">
+                    <tr key={item.id} className="border-t border-border align-top">
+                      <td className="px-4 py-4">
                         <p className="font-medium">{item.business_name}</p>
-                        <p className="text-xs text-muted">{item.city || '-'}</p>
+                        <p className="mt-1 text-xs text-muted">{item.city || 'Sem cidade'}</p>
                       </td>
-                      <td className="px-4 py-3">{owner?.full_name || owner?.email || '-'}</td>
-                      <td className="px-4 py-3">{item.plan_name}</td>
-                      <td className="px-4 py-3"><StatusBadge status={item.status === 'active' ? 'success' : item.status === 'trial' ? 'warning' : 'danger'}>{statusLabel(item.status)}</StatusBadge></td>
-                      <td className="px-4 py-3">{currencyBRL(revenueMap.get(item.id) || 0)}</td>
-                      <td className="px-4 py-3"><a href={`/${item.slug}`} target="_blank" rel="noreferrer" className="text-primary">/{item.slug}</a></td>
-                      <td className="px-4 py-3"><Link href={`/admin/clientes/${item.id}`} className="text-primary">Ver</Link></td>
+                      <td className="px-4 py-4">
+                        <p>{owner?.full_name || owner?.email || '-'}</p>
+                        <p className="mt-1 text-xs text-muted">Cobrança padrão: {currencyBRL(SINGLE_PLAN_PRICE)}/mês</p>
+                      </td>
+                      <td className="px-4 py-4">
+                        <p className="font-medium">{SINGLE_PLAN_LABEL}</p>
+                        <p className="mt-1 text-xs text-muted">Plano fixo</p>
+                      </td>
+                      <td className="px-4 py-4">
+                        <StatusBadge status={item.status === 'active' ? 'success' : item.status === 'trial' ? 'warning' : 'danger'}>
+                          {statusLabel(item.status)}
+                        </StatusBadge>
+                      </td>
+                      <td className="px-4 py-4 font-medium">{currencyBRL(revenueMap.get(item.id) || 0)}</td>
+                      <td className="px-4 py-4">
+                        <Link href={`/${item.slug}`} className="text-primary" target="_blank">
+                          /{item.slug}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-4">
+                        <Link href={`/admin/clientes/${item.id}`} className="text-primary font-medium">
+                          Ver
+                        </Link>
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-        ) : <EmptyState title="Nenhum cliente cadastrado" description="Cadastre o primeiro negócio para começar a usar a plataforma." />}
+        ) : (
+          <EmptyState
+            title="Nenhum cliente encontrado"
+            description="Tente outro filtro ou crie um novo cliente na plataforma."
+            action={
+              <Link href="/admin/clientes/novo" className="rounded-2xl bg-primary px-5 py-3 text-white transition hover:opacity-90">
+                Criar cliente
+              </Link>
+            }
+          />
+        )}
       </div>
     </div>
   );
