@@ -1,136 +1,276 @@
-import { requireAdmin } from '@/lib/auth';
+import Link from 'next/link';
+import {
+  confirmSubscriptionPayment,
+  ensureCurrentMonthSubscription,
+  markSubscriptionPending
+} from '@/actions/admin-subscriptions';
+import { SectionCard, StatCard, StatusBadge, TopHeading } from '@/components/shared/shell';
 import { createClient } from '@/lib/supabase/server';
-import { SectionCard, StatCard, TopHeading, StatusBadge } from '@/components/shared/shell';
-import { currencyBRL, statusLabel } from '@/lib/utils';
-import { SINGLE_PLAN_LABEL, SINGLE_PLAN_PRICE } from '@/lib/validations/business';
+import { requireAdmin } from '@/lib/auth';
+import { currencyBRL, formatDateBR } from '@/lib/utils';
+import { SINGLE_PLAN_PRICE } from '@/lib/validations/business';
+
+type BusinessRow = {
+  id: string;
+  business_name: string;
+  city: string | null;
+  status: string;
+  profiles: { full_name: string | null; email: string | null }[] | { full_name: string | null; email: string | null } | null;
+};
+
+type SubscriptionRow = {
+  id: string;
+  business_id: string;
+  reference_month: number;
+  reference_year: number;
+  amount: number;
+  status: string;
+  due_date: string;
+  paid_at: string | null;
+  payment_method: string | null;
+  notes: string | null;
+};
+
+function getCurrentReference() {
+  const now = new Date();
+  return { month: now.getMonth() + 1, year: now.getFullYear() };
+}
+
+function daysUntil(dateString: string) {
+  const today = new Date();
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const due = new Date(`${dateString}T00:00:00`);
+  return Math.round((due.getTime() - todayOnly.getTime()) / 86400000);
+}
+
+function getSubscriptionVisual(subscription: SubscriptionRow | null) {
+  if (!subscription) {
+    return {
+      label: 'Sem cobrança',
+      tone: 'dark' as const,
+      hint: 'Gere o mês atual'
+    };
+  }
+
+  if (subscription.status === 'paid') {
+    return {
+      label: 'Pago',
+      tone: 'success' as const,
+      hint: subscription.paid_at ? `Pago em ${formatDateBR(subscription.paid_at.slice(0, 10))}` : 'Pagamento confirmado'
+    };
+  }
+
+  if (subscription.status === 'waived') {
+    return {
+      label: 'Isento',
+      tone: 'neutral' as const,
+      hint: 'Cobrança dispensada'
+    };
+  }
+
+  const diff = daysUntil(subscription.due_date);
+
+  if (diff < 0 || subscription.status === 'overdue') {
+    return {
+      label: 'Atrasado',
+      tone: 'danger' as const,
+      hint: `Venceu há ${Math.abs(diff)} dia(s)`
+    };
+  }
+
+  if (diff <= 5) {
+    return {
+      label: 'Vencendo',
+      tone: 'warning' as const,
+      hint: diff === 0 ? 'Vence hoje' : `Vence em ${diff} dia(s)`
+    };
+  }
+
+  return {
+    label: 'Pendente',
+    tone: 'warning' as const,
+    hint: `Vence em ${diff} dia(s)`
+  };
+}
 
 export default async function AdminFinanceiroPage() {
   await requireAdmin();
   const supabase = await createClient();
+  const { month, year } = getCurrentReference();
 
-  const [{ data: businesses }, { data: services }, { data: appointments }, { data: requests }] = await Promise.all([
-    supabase.from('businesses').select('id, business_name, status, created_at, profiles:owner_id(full_name,email)').order('created_at', { ascending: false }),
-    supabase.from('services').select('business_id'),
-    supabase.from('appointments').select('business_id'),
-    supabase.from('booking_requests').select('business_id')
+  const [{ data: businesses }, { data: subscriptions }] = await Promise.all([
+    supabase
+      .from('businesses')
+      .select('id, business_name, city, status, profiles:owner_id(full_name,email)')
+      .order('business_name'),
+    supabase
+      .from('platform_subscriptions')
+      .select('*')
+      .eq('reference_month', month)
+      .eq('reference_year', year)
   ]);
 
-  const businessesList = businesses || [];
-  const activeCount = businessesList.filter((item) => item.status === 'active').length;
-  const trialCount = businessesList.filter((item) => item.status === 'trial').length;
-  const blockedCount = businessesList.filter((item) => item.status === 'blocked').length;
+  const businessRows = (businesses || []) as unknown as BusinessRow[];
+  const currentSubscriptions = (subscriptions || []) as SubscriptionRow[];
 
-  const servicesMap = new Map<string, number>();
-  const appointmentsMap = new Map<string, number>();
-  const requestsMap = new Map<string, number>();
-
-  (services || []).forEach((item) => {
-    servicesMap.set(item.business_id, (servicesMap.get(item.business_id) || 0) + 1);
-  });
-  (appointments || []).forEach((item) => {
-    appointmentsMap.set(item.business_id, (appointmentsMap.get(item.business_id) || 0) + 1);
-  });
-  (requests || []).forEach((item) => {
-    requestsMap.set(item.business_id, (requestsMap.get(item.business_id) || 0) + 1);
+  const subscriptionMap = new Map<string, SubscriptionRow>();
+  currentSubscriptions.forEach((item) => {
+    subscriptionMap.set(item.business_id, item);
   });
 
-  const recurringRevenue = activeCount * SINGLE_PLAN_PRICE;
-  const potentialRevenue = (activeCount + trialCount) * SINGLE_PLAN_PRICE;
-  const totalBase = businessesList.length || 0;
-  const conversionRate = totalBase ? Math.round((activeCount / totalBase) * 100) : 0;
+  const expectedMRR = businessRows.filter((item) => item.status === 'active').length * SINGLE_PLAN_PRICE;
+  const receivedThisMonth = currentSubscriptions
+    .filter((item) => item.status === 'paid')
+    .reduce((sum, item) => sum + Number(item.amount || 0), 0);
 
-  const attentionList = businessesList
-    .map((item) => {
-      const owner = Array.isArray(item.profiles) ? item.profiles[0] : item.profiles;
-      const serviceCount = servicesMap.get(item.id) || 0;
-      const appointmentCount = appointmentsMap.get(item.id) || 0;
-      const requestCount = requestsMap.get(item.id) || 0;
-      const reasons = [
-        item.status === 'blocked' ? 'bloqueado' : null,
-        item.status === 'trial' && serviceCount === 0 ? 'trial sem serviços' : null,
-        item.status === 'trial' && requestCount === 0 ? 'trial sem demanda' : null,
-        item.status === 'active' && appointmentCount === 0 ? 'ativo sem uso da agenda' : null
-      ].filter(Boolean);
+  const pendingBusinesses = businessRows.filter((item) => {
+    const sub = subscriptionMap.get(item.id);
+    return !sub || ['pending', 'overdue'].includes(sub.status);
+  });
 
-      return {
-        id: item.id,
-        business_name: item.business_name,
-        status: item.status,
-        owner,
-        serviceCount,
-        appointmentCount,
-        requestCount,
-        reasons
-      };
-    })
-    .filter((item) => item.reasons.length > 0)
-    .slice(0, 8);
+  const overdueBusinesses = businessRows.filter((item) => {
+    const sub = subscriptionMap.get(item.id);
+    if (!sub) return false;
+    const visual = getSubscriptionVisual(sub);
+    return visual.label === 'Atrasado';
+  });
+
+  const dueSoonBusinesses = businessRows.filter((item) => {
+    const sub = subscriptionMap.get(item.id);
+    if (!sub) return false;
+    const visual = getSubscriptionVisual(sub);
+    return visual.label === 'Vencendo';
+  });
 
   return (
     <div>
       <TopHeading
-        title="Assinaturas da plataforma"
-        description="Esta visão mostra apenas a receita estimada do seu SaaS e a saúde comercial da base. Ela não exibe quanto cada studio fatura com as próprias clientes."
+        title="Financeiro da plataforma"
+        description="Aqui você controla a mensalidade do seu sistema: quem pagou, quem está pendente e quem está perto de vencer."
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="MRR estimado" value={currencyBRL(recurringRevenue)} hint={`Clientes ativos × ${currencyBRL(SINGLE_PLAN_PRICE)}`} tone="success" />
-        <StatCard label="Potencial imediato" value={currencyBRL(potentialRevenue)} hint="Ativos + trials" tone="warning" />
-        <StatCard label="Base total" value={totalBase} hint={`Conversão atual: ${conversionRate}%`} />
-        <StatCard label="Clientes bloqueados" value={blockedCount} hint="Pontos de atenção comercial" tone="dark" />
+        <StatCard label="MRR esperado" value={currencyBRL(expectedMRR)} hint="Plano único de R$ 69,90" />
+        <StatCard label="Recebido no mês" value={currencyBRL(receivedThisMonth)} hint={`Referência ${String(month).padStart(2, '0')}/${year}`} tone="success" />
+        <StatCard label="Pendentes" value={pendingBusinesses.length} hint="Cobrar ou confirmar" tone="warning" />
+        <StatCard label="Atrasados" value={overdueBusinesses.length} hint="Pedem contato direto" tone="dark" />
       </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-[0.85fr,1.15fr]">
-        <SectionCard title="Plano comercial" description="Resumo do posicionamento atual da sua oferta.">
+      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Vencendo em breve" value={dueSoonBusinesses.length} hint="Até 5 dias para vencer" tone="warning" />
+        <StatCard label="Pagaram" value={currentSubscriptions.filter((item) => item.status === 'paid').length} hint="Mensalidade confirmada" tone="success" />
+        <StatCard label="Isentos" value={currentSubscriptions.filter((item) => item.status === 'waived').length} hint="Cobrança dispensada" />
+        <StatCard label="Valor padrão" value={currencyBRL(SINGLE_PLAN_PRICE)} hint="Mensalidade base" />
+      </div>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-[0.95fr,1.05fr]">
+        <SectionCard title="Alertas de cobrança" description="Boa hora para lembrar a cliente antes de vencer ou agir no atraso.">
           <div className="space-y-3">
-            <div className="rounded-2xl border border-border p-4">
-              <p className="font-medium">{SINGLE_PLAN_LABEL}</p>
-              <p className="mt-1 text-sm text-muted">Oferta simplificada para facilitar a venda e reduzir dúvidas na hora de fechar o cliente.</p>
-            </div>
-            <div className="rounded-2xl border border-border p-4">
-              <p className="text-sm text-muted">Valor mensal</p>
-              <p className="mt-2 text-2xl font-semibold">{currencyBRL(SINGLE_PLAN_PRICE)}</p>
-            </div>
-            <div className="rounded-2xl border border-border p-4">
-              <p className="text-sm text-muted">Leitura comercial</p>
-              <ul className="mt-2 space-y-2 text-sm text-muted">
-                <li>• Ativo = assinatura valendo.</li>
-                <li>• Trial = potencial real de fechamento.</li>
-                <li>• Bloqueado = cliente para recuperar ou encerrar.</li>
-              </ul>
-            </div>
+            {[...dueSoonBusinesses, ...overdueBusinesses].slice(0, 10).length ? (
+              [...dueSoonBusinesses, ...overdueBusinesses].slice(0, 10).map((business) => {
+                const subscription = subscriptionMap.get(business.id) || null;
+                const owner = Array.isArray(business.profiles) ? business.profiles[0] : business.profiles;
+                const visual = getSubscriptionVisual(subscription);
+
+                return (
+                  <div key={business.id} className="rounded-2xl border border-border p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-medium">{business.business_name}</p>
+                        <p className="text-sm text-muted">{owner?.full_name || owner?.email || 'Sem responsável'}</p>
+                      </div>
+
+                      <StatusBadge status={visual.tone}>{visual.label}</StatusBadge>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted">
+                      <span className="rounded-full border border-border px-3 py-1">{visual.hint}</span>
+                      {subscription ? (
+                        <span className="rounded-full border border-border px-3 py-1">
+                          Vencimento {formatDateBR(subscription.due_date)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <p className="text-sm text-muted">Nenhum alerta crítico neste momento.</p>
+            )}
           </div>
         </SectionCard>
 
-        <SectionCard title="Clientes que exigem ação" description="Estes negócios pedem acompanhamento seu para converter, ativar ou recuperar.">
+        <SectionCard title="Mensalidades do mês" description="Confirme pagamento ou gere a cobrança atual em um clique.">
           <div className="space-y-3">
-            {attentionList.length ? (
-              attentionList.map((item) => (
-                <div key={item.id} className="rounded-2xl border border-border p-4">
+            {businessRows.map((business) => {
+              const subscription = subscriptionMap.get(business.id) || null;
+              const owner = Array.isArray(business.profiles) ? business.profiles[0] : business.profiles;
+              const visual = getSubscriptionVisual(subscription);
+
+              return (
+                <div key={business.id} className="rounded-2xl border border-border p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <p className="font-medium">{item.business_name}</p>
-                      <p className="text-sm text-muted">{item.owner?.full_name || item.owner?.email || 'Sem responsável'}</p>
+                      <p className="font-medium">{business.business_name}</p>
+                      <p className="text-sm text-muted">{owner?.full_name || owner?.email || 'Sem responsável'}</p>
                     </div>
-                    <StatusBadge status={item.status === 'active' ? 'success' : item.status === 'trial' ? 'warning' : 'danger'}>
-                      {statusLabel(item.status)}
-                    </StatusBadge>
+
+                    <div className="flex items-center gap-3">
+                      <StatusBadge status={visual.tone}>{visual.label}</StatusBadge>
+                      <Link href={`/admin/clientes/${business.id}`} className="text-sm font-medium text-primary">
+                        Abrir
+                      </Link>
+                    </div>
                   </div>
+
                   <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted">
-                    {item.reasons.map((reason) => (
-                      <span key={reason} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-900">
-                        {reason}
-                      </span>
-                    ))}
-                    <span className="rounded-full border border-border px-3 py-1">Serviços {item.serviceCount}</span>
-                    <span className="rounded-full border border-border px-3 py-1">Solicitações {item.requestCount}</span>
-                    <span className="rounded-full border border-border px-3 py-1">Agenda {item.appointmentCount}</span>
+                    <span className="rounded-full border border-border px-3 py-1">Status do studio: {business.status}</span>
+                    {subscription ? (
+                      <>
+                        <span className="rounded-full border border-border px-3 py-1">
+                          Valor {currencyBRL(subscription.amount)}
+                        </span>
+                        <span className="rounded-full border border-border px-3 py-1">
+                          Vencimento {formatDateBR(subscription.due_date)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="rounded-full border border-border px-3 py-1">Sem cobrança gerada</span>
+                    )}
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    {!subscription ? (
+                      <form action={ensureCurrentMonthSubscription}>
+                        <input type="hidden" name="businessId" value={business.id} />
+                        <button className="rounded-xl border border-border bg-white px-4 py-2 text-sm font-medium transition hover:bg-primary-soft">
+                          Gerar mês atual
+                        </button>
+                      </form>
+                    ) : subscription.status !== 'paid' ? (
+                      <form action={confirmSubscriptionPayment}>
+                        <input type="hidden" name="subscriptionId" value={subscription.id} />
+                        <input type="hidden" name="businessId" value={business.id} />
+                        <input type="hidden" name="amount" value={subscription.amount} />
+                        <input type="hidden" name="paymentMethod" value={subscription.payment_method || 'pix'} />
+                        <button className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-white transition hover:opacity-90">
+                          Confirmar pagamento
+                        </button>
+                      </form>
+                    ) : (
+                      <form action={markSubscriptionPending}>
+                        <input type="hidden" name="subscriptionId" value={subscription.id} />
+                        <input type="hidden" name="businessId" value={business.id} />
+                        <input type="hidden" name="dueDate" value={subscription.due_date} />
+                        <button className="rounded-xl border border-border bg-white px-4 py-2 text-sm font-medium transition hover:bg-primary-soft">
+                          Voltar pendente
+                        </button>
+                      </form>
+                    )}
                   </div>
                 </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted">Nenhum cliente crítico neste momento.</p>
-            )}
+              );
+            })}
           </div>
         </SectionCard>
       </div>
