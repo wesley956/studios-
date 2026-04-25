@@ -3,12 +3,49 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { businessSchema, SINGLE_PLAN_KEY } from '@/lib/validations/business';
+import { businessSchema, SINGLE_PLAN_KEY, SINGLE_PLAN_PRICE } from '@/lib/validations/business';
 import { getSuggestedThemeByBusinessType } from '@/lib/themes';
 import { slugify } from '@/lib/utils';
 
 function normalizeString(value: FormDataEntryValue | null) {
   return String(value || '').trim();
+}
+
+function getCurrentReference() {
+  const now = new Date();
+  return {
+    month: now.getMonth() + 1,
+    year: now.getFullYear()
+  };
+}
+
+function getDefaultDueDate(referenceMonth: number, referenceYear: number) {
+  return `${referenceYear}-${String(referenceMonth).padStart(2, '0')}-10`;
+}
+
+async function createCurrentMonthSubscriptionForBusiness(businessId: string) {
+  const supabase = await createClient();
+  const { month, year } = getCurrentReference();
+
+  const { error } = await supabase
+    .from('platform_subscriptions')
+    .upsert(
+      {
+        business_id: businessId,
+        reference_month: month,
+        reference_year: year,
+        amount: Number(SINGLE_PLAN_PRICE.toFixed(2)),
+        status: 'pending',
+        due_date: getDefaultDueDate(month, year),
+        notes: 'Mensalidade criada automaticamente ao cadastrar o cliente.',
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: 'business_id,reference_month,reference_year' }
+    );
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
 export async function createBusiness(formData: FormData): Promise<void> {
@@ -45,6 +82,7 @@ export async function createBusiness(formData: FormData): Promise<void> {
 
   let finalOwnerId = ownerId;
   let createdAuthUserId: string | null = null;
+  let createdBusinessId: string | null = null;
 
   try {
     if (!finalOwnerId) {
@@ -80,29 +118,41 @@ export async function createBusiness(formData: FormData): Promise<void> {
       }
     }
 
-    const { error } = await supabase.from('businesses').insert({
-      owner_id: finalOwnerId,
-      business_name: parsed.data.businessName,
-      slug: parsed.data.slug,
-      city: parsed.data.city || null,
-      whatsapp: parsed.data.whatsapp || null,
-      instagram: parsed.data.instagram || null,
-      address: parsed.data.address || null,
-      description: parsed.data.description || null,
-      tagline: parsed.data.tagline || null,
-      business_type: parsed.data.businessType,
-      theme_key: parsed.data.themeKey,
-      plan_name: SINGLE_PLAN_KEY,
-      status: parsed.data.status
-    });
+    const { data: createdBusiness, error } = await supabase
+      .from('businesses')
+      .insert({
+        owner_id: finalOwnerId,
+        business_name: parsed.data.businessName,
+        slug: parsed.data.slug,
+        city: parsed.data.city || null,
+        whatsapp: parsed.data.whatsapp || null,
+        instagram: parsed.data.instagram || null,
+        address: parsed.data.address || null,
+        description: parsed.data.description || null,
+        tagline: parsed.data.tagline || null,
+        business_type: parsed.data.businessType,
+        theme_key: parsed.data.themeKey,
+        plan_name: SINGLE_PLAN_KEY,
+        status: parsed.data.status
+      })
+      .select('id')
+      .single();
 
-    if (error) {
-      throw new Error(error.message);
+    if (error || !createdBusiness) {
+      throw new Error(error?.message || 'Não foi possível criar o negócio.');
     }
+
+    createdBusinessId = createdBusiness.id;
+    await createCurrentMonthSubscriptionForBusiness(createdBusiness.id);
   } catch (error) {
+    if (createdBusinessId) {
+      await supabase.from('businesses').delete().eq('id', createdBusinessId);
+    }
+
     if (createdAuthUserId) {
       await admin.auth.admin.deleteUser(createdAuthUserId);
     }
+
     throw error;
   }
 
