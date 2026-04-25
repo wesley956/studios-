@@ -2,10 +2,11 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-import { businessSchema } from '@/lib/validations/business';
-import { slugify } from '@/lib/utils';
+import { businessSchema, SINGLE_PLAN_KEY } from '@/lib/validations/business';
 import { getCurrentBusiness } from '@/lib/auth';
+import { getSuggestedThemeByBusinessType } from '@/lib/themes';
 import { DEFAULT_BUSINESS_HOURS } from '@/lib/schedule';
+import { slugify } from '@/lib/utils';
 
 function normalize(value: FormDataEntryValue | null) {
   return String(value || '').trim();
@@ -13,6 +14,12 @@ function normalize(value: FormDataEntryValue | null) {
 
 export async function updateBusinessSettings(formData: FormData): Promise<void> {
   const currentBusiness = await getCurrentBusiness();
+
+  const businessType = normalize(formData.get('businessType')) || currentBusiness.business_type || 'studio_geral';
+  const themeKey =
+    normalize(formData.get('themeKey')) ||
+    currentBusiness.theme_key ||
+    getSuggestedThemeByBusinessType(businessType);
 
   const parsed = businessSchema.safeParse({
     ownerId: currentBusiness.owner_id,
@@ -23,7 +30,10 @@ export async function updateBusinessSettings(formData: FormData): Promise<void> 
     instagram: formData.get('instagram'),
     address: formData.get('address'),
     description: formData.get('description'),
-    planName: currentBusiness.plan_name,
+    tagline: formData.get('tagline'),
+    businessType,
+    themeKey,
+    planName: SINGLE_PLAN_KEY,
     status: currentBusiness.status
   });
 
@@ -36,6 +46,7 @@ export async function updateBusinessSettings(formData: FormData): Promise<void> 
   const leadTime = Number(formData.get('bookingLeadTimeHours') || currentBusiness.booking_lead_time_hours || 2);
 
   const supabase = await createClient();
+
   const { error } = await supabase
     .from('businesses')
     .update({
@@ -46,7 +57,9 @@ export async function updateBusinessSettings(formData: FormData): Promise<void> 
       instagram: parsed.data.instagram || null,
       address: parsed.data.address || null,
       description: parsed.data.description || null,
-      tagline: normalize(formData.get('tagline')) || null,
+      tagline: parsed.data.tagline || null,
+      business_type: parsed.data.businessType,
+      theme_key: parsed.data.themeKey,
       public_note: normalize(formData.get('publicNote')) || null,
       logo_url: normalize(formData.get('logoUrl')) || null,
       cover_url: normalize(formData.get('coverUrl')) || null,
@@ -57,7 +70,9 @@ export async function updateBusinessSettings(formData: FormData): Promise<void> 
     .eq('id', currentBusiness.id)
     .eq('owner_id', currentBusiness.owner_id);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw new Error(error.message);
+  }
 
   const hoursToPersist = DEFAULT_BUSINESS_HOURS.map((day) => ({
     business_id: currentBusiness.id,
@@ -67,8 +82,13 @@ export async function updateBusinessSettings(formData: FormData): Promise<void> 
     close_time: normalize(formData.get(`closeTime_${day.day_of_week}`)) || day.close_time
   }));
 
-  const { error: hoursError } = await supabase.from('business_hours').upsert(hoursToPersist, { onConflict: 'business_id,day_of_week' });
-  if (hoursError) throw new Error(hoursError.message);
+  const { error: hoursError } = await supabase
+    .from('business_hours')
+    .upsert(hoursToPersist, { onConflict: 'business_id,day_of_week' });
+
+  if (hoursError) {
+    throw new Error(hoursError.message);
+  }
 
   revalidatePath('/app/configuracoes');
   revalidatePath('/app');
