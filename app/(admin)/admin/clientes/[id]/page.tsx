@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { updateBusinessAdmin } from '@/actions/admin-businesses';
 import {
   confirmSubscriptionPayment,
@@ -8,13 +9,45 @@ import {
   markSubscriptionPending,
   updateSubscriptionRecord
 } from '@/actions/admin-subscriptions';
-import { Field, Input, Select, SubmitButton, Textarea, DangerButton, SecondaryButton } from '@/components/shared/forms';
+import {
+  Field,
+  Input,
+  Select,
+  SubmitButton,
+  Textarea,
+  DangerButton,
+  SecondaryButton
+} from '@/components/shared/forms';
 import { SectionCard, StatCard, StatusBadge, TopHeading } from '@/components/shared/shell';
 import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
 import { formatDateBR, statusLabel } from '@/lib/utils';
 import { BUSINESS_TYPE_OPTIONS, THEME_OPTIONS } from '@/lib/themes';
 import { SINGLE_PLAN_KEY, SINGLE_PLAN_LABEL, SINGLE_PLAN_PRICE } from '@/lib/validations/business';
+
+type BusinessRow = {
+  id: string;
+  owner_id: string;
+  business_name: string;
+  city: string | null;
+  status: string;
+  plan_name: string | null;
+  slug: string | null;
+  tagline: string | null;
+  description: string | null;
+  whatsapp: string | null;
+  instagram: string | null;
+  address: string | null;
+  created_at: string | null;
+  business_type: string | null;
+  theme_key: string | null;
+};
+
+type ProfileRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+};
 
 type SubscriptionRow = {
   id: string;
@@ -54,7 +87,9 @@ function getBillingVisual(subscription: SubscriptionRow | null) {
     return {
       label: 'Pago',
       tone: 'success' as const,
-      hint: subscription.paid_at ? `Pago em ${formatDateBR(subscription.paid_at.slice(0, 10))}` : 'Pagamento confirmado'
+      hint: subscription.paid_at
+        ? `Pago em ${formatDateBR(subscription.paid_at.slice(0, 10))}`
+        : 'Pagamento confirmado'
     };
   }
 
@@ -102,7 +137,7 @@ export default async function AdminClienteDetalhePage({
   const { month, year } = getCurrentReference();
 
   const [
-    { data },
+    { data: business, error: businessError },
     { count: servicesCount },
     { count: customersCount },
     { count: requestsCount },
@@ -114,10 +149,10 @@ export default async function AdminClienteDetalhePage({
     supabase
       .from('businesses')
       .select(
-        'id, owner_id, business_name, city, status, plan_name, slug, tagline, description, whatsapp, instagram, address, created_at, business_type, theme_key, profiles:owner_id(full_name,email)'
+        'id, owner_id, business_name, city, status, plan_name, slug, tagline, description, whatsapp, instagram, address, created_at, business_type, theme_key'
       )
       .eq('id', id)
-      .single(),
+      .maybeSingle(),
     supabase.from('services').select('*', { count: 'exact', head: true }).eq('business_id', id),
     supabase.from('customers').select('*', { count: 'exact', head: true }).eq('business_id', id),
     supabase.from('booking_requests').select('*', { count: 'exact', head: true }).eq('business_id', id),
@@ -142,10 +177,21 @@ export default async function AdminClienteDetalhePage({
       .order('reference_month', { ascending: false })
   ]);
 
-  const business = data;
-  const owner = business ? (Array.isArray(business.profiles) ? business.profiles[0] : business.profiles) : null;
+  if (businessError) {
+    throw new Error(businessError.message);
+  }
 
-  const publicReady = Boolean(business?.slug) && Number(servicesCount || 0) > 0;
+  if (!business) {
+    notFound();
+  }
+
+  const { data: owner } = await supabase
+    .from('profiles')
+    .select('id, full_name, email')
+    .eq('id', business.owner_id)
+    .maybeSingle();
+
+  const publicReady = Boolean(business.slug) && Number(servicesCount || 0) > 0;
   const onboardingScore = Math.min(
     100,
     (servicesCount ? 25 : 0) +
@@ -164,15 +210,11 @@ export default async function AdminClienteDetalhePage({
     await updateBusinessAdmin(formData);
   }
 
-  if (!business) {
-    return <div className="text-sm text-muted">Cliente não encontrado.</div>;
-  }
-
   return (
     <div>
       <TopHeading
         title={business.business_name}
-        description="Gerencie dados do studio, acompanhe a mensalidade do seu sistema e veja o uso da plataforma."
+        description="Gerencie os dados do studio, acompanhe a mensalidade do seu sistema e veja o uso da plataforma."
         action={
           business.slug ? (
             <Link
@@ -286,7 +328,15 @@ export default async function AdminClienteDetalhePage({
               <div>
                 <p className="text-sm text-muted">Status atual</p>
                 <div className="mt-2">
-                  <StatusBadge status={business.status === 'active' ? 'success' : business.status === 'trial' ? 'warning' : 'danger'}>
+                  <StatusBadge
+                    status={
+                      business.status === 'active'
+                        ? 'success'
+                        : business.status === 'trial'
+                          ? 'warning'
+                          : 'danger'
+                    }
+                  >
                     {statusLabel(business.status || '')}
                   </StatusBadge>
                 </div>
@@ -311,130 +361,63 @@ export default async function AdminClienteDetalhePage({
             </div>
           </SectionCard>
 
-          <SectionCard title="Leitura rápida" description="Como esse cliente está avançando no uso da plataforma.">
-            <ul className="space-y-3 text-sm text-muted">
-              <li>• {servicesCount ? 'Já cadastrou serviços.' : 'Ainda precisa cadastrar serviços.'}</li>
-              <li>• {requestsCount ? 'Já recebeu solicitações públicas.' : 'Ainda não recebeu solicitações públicas.'}</li>
-              <li>• {appointmentsCount ? 'Já está usando agenda.' : 'Ainda não está usando agenda.'}</li>
-              <li>• {publicReady ? 'A página pública está minimamente pronta.' : 'Falta terminar a página pública antes de divulgar.'}</li>
-            </ul>
+          <SectionCard title="Mensalidade atual" description="Controle se a cliente já pagou este mês ou não.">
+            {currentSubscription ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <StatusBadge status={billing.tone}>{billing.label}</StatusBadge>
+                  <span className="text-sm text-muted">{billing.hint}</span>
+                </div>
+
+                <div className="flex flex-wrap gap-2 text-xs text-muted">
+                  <span className="rounded-full border border-border px-3 py-1">
+                    Vencimento: {formatDateBR(currentSubscription.due_date)}
+                  </span>
+                  <span className="rounded-full border border-border px-3 py-1">
+                    Valor: R$ {currentSubscription.amount.toFixed(2).replace('.', ',')}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  {currentSubscription.status !== 'paid' ? (
+                    <form action={confirmSubscriptionPayment}>
+                      <input type="hidden" name="subscriptionId" value={currentSubscription.id} />
+                      <input type="hidden" name="businessId" value={business.id} />
+                      <input type="hidden" name="amount" value={currentSubscription.amount} />
+                      <input type="hidden" name="paymentMethod" value="pix" />
+                      <SubmitButton>Confirmar pagamento</SubmitButton>
+                    </form>
+                  ) : (
+                    <form action={markSubscriptionPending}>
+                      <input type="hidden" name="subscriptionId" value={currentSubscription.id} />
+                      <input type="hidden" name="businessId" value={business.id} />
+                      <input type="hidden" name="dueDate" value={currentSubscription.due_date} />
+                      <SecondaryButton type="submit">Voltar para pendente</SecondaryButton>
+                    </form>
+                  )}
+
+                  <form action={ensureCurrentMonthSubscription}>
+                    <input type="hidden" name="businessId" value={business.id} />
+                    <SecondaryButton type="submit">Garantir cobrança do mês</SecondaryButton>
+                  </form>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-border bg-[var(--theme-surface-alt)] p-6">
+                <p className="text-sm text-muted">Ainda não existe cobrança registrada para este mês.</p>
+
+                <form action={ensureCurrentMonthSubscription} className="mt-4">
+                  <input type="hidden" name="businessId" value={business.id} />
+                  <SubmitButton>Gerar mensalidade do mês</SubmitButton>
+                </form>
+              </div>
+            )}
           </SectionCard>
         </div>
       </div>
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[1fr,1fr]">
-        <SectionCard
-          title={`Mensalidade de ${String(month).padStart(2, '0')}/${year}`}
-          description="Aqui você controla se a cliente pagou o seu sistema neste mês."
-        >
-          {currentSubscription ? (
-            <div className="space-y-5">
-              <div className="flex flex-wrap items-center gap-3">
-                <StatusBadge status={billing.tone}>{billing.label}</StatusBadge>
-                <span className="text-sm text-muted">{billing.hint}</span>
-              </div>
-
-              <form action={updateSubscriptionRecord} className="grid gap-4 md:grid-cols-2">
-                <input type="hidden" name="subscriptionId" value={currentSubscription.id} />
-                <input type="hidden" name="businessId" value={business.id} />
-
-                <Field label="Mês">
-                  <Input name="referenceMonth" type="number" min={1} max={12} defaultValue={currentSubscription.reference_month} />
-                </Field>
-
-                <Field label="Ano">
-                  <Input name="referenceYear" type="number" defaultValue={currentSubscription.reference_year} />
-                </Field>
-
-                <Field label="Valor">
-                  <Input name="amount" defaultValue={String(currentSubscription.amount).replace('.', ',')} />
-                </Field>
-
-                <Field label="Vencimento">
-                  <Input name="dueDate" type="date" defaultValue={currentSubscription.due_date} />
-                </Field>
-
-                <Field label="Status">
-                  <Select name="status" defaultValue={currentSubscription.status}>
-                    <option value="pending">Pendente</option>
-                    <option value="overdue">Atrasado</option>
-                    <option value="paid">Pago</option>
-                    <option value="waived">Isento</option>
-                  </Select>
-                </Field>
-
-                <Field label="Forma de pagamento">
-                  <Select name="paymentMethod" defaultValue={currentSubscription.payment_method || ''}>
-                    <option value="">Não informado</option>
-                    <option value="pix">Pix</option>
-                    <option value="cash">Dinheiro</option>
-                    <option value="credit_card">Cartão de crédito</option>
-                    <option value="debit_card">Cartão de débito</option>
-                    <option value="transfer">Transferência</option>
-                  </Select>
-                </Field>
-
-                <Field label="Pago em" className="md:col-span-2">
-                  <Input
-                    name="paidAt"
-                    type="datetime-local"
-                    defaultValue={
-                      currentSubscription.paid_at
-                        ? new Date(currentSubscription.paid_at).toISOString().slice(0, 16)
-                        : ''
-                    }
-                  />
-                </Field>
-
-                <Field label="Observações" className="md:col-span-2">
-                  <Textarea name="notes" rows={3} defaultValue={currentSubscription.notes || ''} />
-                </Field>
-
-                <div className="md:col-span-2 flex flex-wrap gap-3">
-                  <SubmitButton>Salvar mensalidade</SubmitButton>
-                </div>
-              </form>
-
-              <div className="flex flex-wrap gap-3">
-                {currentSubscription.status !== 'paid' ? (
-                  <form action={confirmSubscriptionPayment}>
-                    <input type="hidden" name="subscriptionId" value={currentSubscription.id} />
-                    <input type="hidden" name="businessId" value={business.id} />
-                    <input type="hidden" name="amount" value={currentSubscription.amount} />
-                    <input type="hidden" name="paymentMethod" value={currentSubscription.payment_method || 'pix'} />
-                    <SubmitButton>Confirmar pagamento</SubmitButton>
-                  </form>
-                ) : (
-                  <form action={markSubscriptionPending}>
-                    <input type="hidden" name="subscriptionId" value={currentSubscription.id} />
-                    <input type="hidden" name="businessId" value={business.id} />
-                    <input type="hidden" name="dueDate" value={currentSubscription.due_date} />
-                    <SecondaryButton type="submit">Voltar para pendente</SecondaryButton>
-                  </form>
-                )}
-
-                <form action={deleteSubscriptionRecord}>
-                  <input type="hidden" name="subscriptionId" value={currentSubscription.id} />
-                  <input type="hidden" name="businessId" value={business.id} />
-                  <DangerButton type="submit">Excluir cobrança do mês</DangerButton>
-                </form>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-border bg-[var(--theme-surface-alt)] p-6">
-              <p className="text-sm text-muted">
-                Ainda não existe cobrança registrada para este mês.
-              </p>
-
-              <form action={ensureCurrentMonthSubscription} className="mt-4">
-                <input type="hidden" name="businessId" value={business.id} />
-                <SubmitButton>Gerar mensalidade do mês</SubmitButton>
-              </form>
-            </div>
-          )}
-        </SectionCard>
-
-        <SectionCard title="Criar cobrança manual" description="Use para registrar meses anteriores ou ajustes específicos.">
+        <SectionCard title="Criar cobrança manual" description="Registre mês anterior, ajuste ou cobrança específica.">
           <form action={createSubscriptionRecord} className="grid gap-4 md:grid-cols-2">
             <input type="hidden" name="businessId" value={business.id} />
 
@@ -451,7 +434,11 @@ export default async function AdminClienteDetalhePage({
             </Field>
 
             <Field label="Vencimento">
-              <Input name="dueDate" type="date" defaultValue={`${year}-${String(month).padStart(2, '0')}-10`} />
+              <Input
+                name="dueDate"
+                type="date"
+                defaultValue={`${year}-${String(month).padStart(2, '0')}-10`}
+              />
             </Field>
 
             <Field label="Status">
@@ -479,7 +466,7 @@ export default async function AdminClienteDetalhePage({
             </Field>
 
             <Field label="Observações" className="md:col-span-2">
-              <Textarea name="notes" rows={3} placeholder="Ex.: cliente pediu mais prazo, cobrança manual, ajuste..." />
+              <Textarea name="notes" rows={3} placeholder="Ex.: cliente pediu prazo, ajuste manual..." />
             </Field>
 
             <div className="md:col-span-2">
@@ -487,10 +474,8 @@ export default async function AdminClienteDetalhePage({
             </div>
           </form>
         </SectionCard>
-      </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-2">
-        <SectionCard title="Histórico de mensalidades" description="CRUD completo da assinatura desse cliente.">
+        <SectionCard title="Histórico de mensalidades" description="Veja e edite os meses já registrados.">
           <div className="space-y-4">
             {subscriptionRows.length ? (
               subscriptionRows.map((item) => {
@@ -504,7 +489,8 @@ export default async function AdminClienteDetalhePage({
                           {String(item.reference_month).padStart(2, '0')}/{item.reference_year}
                         </p>
                         <p className="mt-1 text-sm text-muted">
-                          Vencimento: {formatDateBR(item.due_date)} • Valor: R$ {item.amount.toFixed(2).replace('.', ',')}
+                          Vencimento: {formatDateBR(item.due_date)} • Valor: R${' '}
+                          {item.amount.toFixed(2).replace('.', ',')}
                         </p>
                       </div>
 
@@ -598,56 +584,76 @@ export default async function AdminClienteDetalhePage({
             )}
           </div>
         </SectionCard>
+      </div>
 
-        <div className="space-y-6">
-          <SectionCard title="Últimos atendimentos" description="Atividade operacional recente do studio, sem mostrar valores financeiros.">
-            <div className="space-y-3">
-              {appointments?.length ? (
-                appointments.map((item) => (
-                  <div key={item.id} className="rounded-2xl border border-border p-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="font-medium">{(item.customers as { full_name?: string } | null)?.full_name || 'Cliente'}</p>
-                        <p className="text-sm text-muted">
-                          {(item.services as { name?: string } | null)?.name || 'Serviço'} • {formatDateBR(item.appointment_date)} às {item.appointment_time?.slice(0, 5)}
-                        </p>
-                      </div>
-                      <StatusBadge status={item.status === 'completed' ? 'success' : item.status === 'confirmed' ? 'neutral' : 'warning'}>
-                        {statusLabel(item.status)}
-                      </StatusBadge>
+      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+        <SectionCard title="Últimos atendimentos" description="Atividade operacional recente do studio.">
+          <div className="space-y-3">
+            {appointments?.length ? (
+              appointments.map((item) => (
+                <div key={item.id} className="rounded-2xl border border-border p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-medium">
+                        {(item.customers as { full_name?: string } | null)?.full_name || 'Cliente'}
+                      </p>
+                      <p className="text-sm text-muted">
+                        {(item.services as { name?: string } | null)?.name || 'Serviço'} •{' '}
+                        {formatDateBR(item.appointment_date)} às {item.appointment_time?.slice(0, 5)}
+                      </p>
                     </div>
+                    <StatusBadge
+                      status={
+                        item.status === 'completed'
+                          ? 'success'
+                          : item.status === 'confirmed'
+                            ? 'neutral'
+                            : 'warning'
+                      }
+                    >
+                      {statusLabel(item.status)}
+                    </StatusBadge>
                   </div>
-                ))
-              ) : (
-                <p className="text-sm text-muted">Sem atividade recente ainda.</p>
-              )}
-            </div>
-          </SectionCard>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted">Sem atividade recente ainda.</p>
+            )}
+          </div>
+        </SectionCard>
 
-          <SectionCard title="Últimas solicitações" description="Leitura do interesse gerado pela página pública.">
-            <div className="space-y-3">
-              {latestRequests?.length ? (
-                latestRequests.map((item) => (
-                  <div key={item.id} className="rounded-2xl border border-border p-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="font-medium">{item.customer_name || 'Cliente'}</p>
-                        <p className="text-sm text-muted">
-                          {item.service_name || 'Serviço'} • {formatDateBR(item.preferred_date)} às {item.preferred_time?.slice(0, 5)}
-                        </p>
-                      </div>
-                      <StatusBadge status={item.status === 'approved' ? 'success' : item.status === 'pending' ? 'warning' : 'danger'}>
-                        {statusLabel(item.status)}
-                      </StatusBadge>
+        <SectionCard title="Últimas solicitações" description="Interesse gerado pela página pública do studio.">
+          <div className="space-y-3">
+            {latestRequests?.length ? (
+              latestRequests.map((item) => (
+                <div key={item.id} className="rounded-2xl border border-border p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-medium">{item.customer_name || 'Cliente'}</p>
+                      <p className="text-sm text-muted">
+                        {item.service_name || 'Serviço'} • {formatDateBR(item.preferred_date)} às{' '}
+                        {item.preferred_time?.slice(0, 5)}
+                      </p>
                     </div>
+                    <StatusBadge
+                      status={
+                        item.status === 'approved'
+                          ? 'success'
+                          : item.status === 'pending'
+                            ? 'warning'
+                            : 'danger'
+                      }
+                    >
+                      {statusLabel(item.status)}
+                    </StatusBadge>
                   </div>
-                ))
-              ) : (
-                <p className="text-sm text-muted">Ainda não existem solicitações recentes.</p>
-              )}
-            </div>
-          </SectionCard>
-        </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted">Ainda não existem solicitações recentes.</p>
+            )}
+          </div>
+        </SectionCard>
       </div>
     </div>
   );
