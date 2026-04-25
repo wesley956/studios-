@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const SINGLE_PLAN_LABEL = 'Plano único';
 export const SINGLE_PLAN_PRICE = 69.9;
-export const SINGLE_PLAN_VALUE = 'single';
+export const SINGLE_PLAN_KEY = 'single';
 
 export const businessSchema = z.object({
   ownerId: z.string().uuid(),
@@ -13,6 +13,7 @@ export const businessSchema = z.object({
   instagram: z.string().optional().nullable(),
   address: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
+  tagline: z.string().optional().nullable(),
   businessType: z.enum([
     'barbearia',
     'salao',
@@ -28,6 +29,6 @@ export const businessSchema = z.object({
     'clean_clinic',
     'modern_neutral'
   ]),
-  planName: z.literal(SINGLE_PLAN_VALUE).default(SINGLE_PLAN_VALUE),
+  planName: z.literal(SINGLE_PLAN_KEY).default(SINGLE_PLAN_KEY),
   status: z.enum(['trial', 'active', 'blocked']).default('trial')
 });
