@@ -4,8 +4,8 @@ import { Field, Input, Select, SubmitButton, Textarea } from '@/components/share
 import { SectionCard, StatCard, StatusBadge, TopHeading } from '@/components/shared/shell';
 import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
-import { currencyBRL, formatDateBR, statusLabel } from '@/lib/utils';
-import { SINGLE_PLAN_KEY, SINGLE_PLAN_LABEL, SINGLE_PLAN_PRICE } from '@/lib/validations/business';
+import { formatDateBR, statusLabel } from '@/lib/utils';
+import { SINGLE_PLAN_LABEL, SINGLE_PLAN_PRICE } from '@/lib/validations/business';
 
 export default async function AdminClienteDetalhePage({ params }: { params: Promise<{ id: string }> }) {
   await requireAdmin();
@@ -17,8 +17,9 @@ export default async function AdminClienteDetalhePage({ params }: { params: Prom
     { count: servicesCount },
     { count: customersCount },
     { count: requestsCount },
-    { data: appointments },
-    { data: payments }
+    { count: appointmentsCount },
+    { data: latestRequests },
+    { data: appointments }
   ] = await Promise.all([
     supabase
       .from('businesses')
@@ -28,21 +29,28 @@ export default async function AdminClienteDetalhePage({ params }: { params: Prom
     supabase.from('services').select('*', { count: 'exact', head: true }).eq('business_id', id),
     supabase.from('customers').select('*', { count: 'exact', head: true }).eq('business_id', id),
     supabase.from('booking_requests').select('*', { count: 'exact', head: true }).eq('business_id', id),
+    supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('business_id', id),
+    supabase
+      .from('booking_requests')
+      .select('id, preferred_date, preferred_time, status, service_name, customer_name')
+      .eq('business_id', id)
+      .order('created_at', { ascending: false })
+      .limit(5),
     supabase
       .from('appointments')
-      .select('id, status, final_price, appointment_date, appointment_time, customers(full_name), services(name)')
+      .select('id, status, appointment_date, appointment_time, customers(full_name), services(name)')
       .eq('business_id', id)
       .order('appointment_date', { ascending: false })
-      .limit(6),
-    supabase.from('payments').select('amount, payment_status, paid_at').eq('business_id', id)
+      .limit(6)
   ]);
 
   const business = data;
   const owner = business ? (Array.isArray(business.profiles) ? business.profiles[0] : business.profiles) : null;
-  const receivedPayments = (payments || []).filter((item) => ['paid', 'partial'].includes(String(item.payment_status)));
-  const totalRevenue = receivedPayments.reduce<number>((sum, item) => sum + Number(item.amount || 0), 0);
-  const lastPaymentAt = [...receivedPayments]
-    .sort((a, b) => String(b.paid_at || '').localeCompare(String(a.paid_at || '')))[0]?.paid_at;
+  const publicReady = Boolean(business?.slug) && Number(servicesCount || 0) > 0;
+  const onboardingScore = Math.min(
+    100,
+    (servicesCount ? 25 : 0) + (customersCount ? 20 : 0) + (requestsCount ? 25 : 0) + (appointmentsCount ? 30 : 0)
+  );
 
   async function handleUpdateBusinessAdmin(formData: FormData): Promise<void> {
     'use server';
@@ -53,35 +61,35 @@ export default async function AdminClienteDetalhePage({ params }: { params: Prom
     <div>
       <TopHeading
         title={business?.business_name || 'Cliente'}
-        description="Edite a conta, acompanhe receita e veja atividade recente da operação."
+        description="Visão administrativa focada em configuração, uso e atividade do studio — sem expor o faturamento interno dele."
         action={
-          business ? (
-            <Link href={`/${business.slug}`} target="_blank" className="rounded-2xl border border-border bg-white px-5 py-3 transition hover:bg-primary-soft">
+          business?.slug ? (
+            <Link href={`/${business.slug}`} className="rounded-2xl border border-border bg-white px-5 py-3 transition hover:bg-primary-soft">
               Abrir página pública
             </Link>
           ) : null
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Serviços" value={servicesCount || 0} />
-        <StatCard label="Clientes" value={customersCount || 0} />
-        <StatCard label="Solicitações" value={requestsCount || 0} />
-        <StatCard label="Receita acumulada" value={currencyBRL(totalRevenue)} hint={lastPaymentAt ? `Último recebimento: ${formatDateBR(String(lastPaymentAt).slice(0, 10))}` : 'Sem recebimentos'} tone="success" />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <StatCard label="Serviços" value={servicesCount || 0} hint={publicReady ? 'Página pronta para divulgar' : 'Precisa cadastrar serviços'} />
+        <StatCard label="Clientes" value={customersCount || 0} hint="Base própria do studio" />
+        <StatCard label="Solicitações" value={requestsCount || 0} hint="Demanda gerada pela página pública" />
+        <StatCard label="Agenda" value={appointmentsCount || 0} hint="Atendimentos registrados" />
+        <StatCard label="Ativação" value={`${onboardingScore}%`} hint={`Plano único de R$ ${SINGLE_PLAN_PRICE.toFixed(2).replace('.', ',')}`} tone={onboardingScore >= 70 ? 'success' : onboardingScore >= 40 ? 'warning' : 'dark'} />
       </div>
 
-      <div className="mt-8 grid gap-6 xl:grid-cols-[1.05fr,0.95fr]">
-        <SectionCard title="Dados do cliente" description="Mantenha as informações comerciais e públicas do negócio atualizadas.">
-          <form action={handleUpdateBusinessAdmin} className="space-y-6">
+      <div className="mt-8 grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
+        <SectionCard title="Dados do cliente" description="Atualize a conta do studio dentro da plataforma.">
+          <form action={handleUpdateBusinessAdmin} className="space-y-5">
             <input type="hidden" name="businessId" value={business?.id || ''} />
-            <input type="hidden" name="planName" value={SINGLE_PLAN_KEY} />
 
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Nome do negócio">
-                <Input name="businessName" defaultValue={business?.business_name || ''} />
+                <Input name="businessName" defaultValue={business?.business_name || ''} required />
               </Field>
               <Field label="Slug público">
-                <Input name="slug" defaultValue={business?.slug || ''} />
+                <Input name="slug" defaultValue={business?.slug || ''} required />
               </Field>
               <Field label="Cidade">
                 <Input name="city" defaultValue={business?.city || ''} />
@@ -92,40 +100,39 @@ export default async function AdminClienteDetalhePage({ params }: { params: Prom
               <Field label="Instagram">
                 <Input name="instagram" defaultValue={business?.instagram || ''} />
               </Field>
-              <Field label="Status">
+              <Field label="Status do cliente">
                 <Select name="status" defaultValue={business?.status || 'trial'}>
                   <option value="trial">Teste</option>
                   <option value="active">Ativo</option>
                   <option value="blocked">Bloqueado</option>
                 </Select>
               </Field>
-              <Field label="Plano contratado" className="md:col-span-2" hint={`Cobrança padrão atual: ${currencyBRL(SINGLE_PLAN_PRICE)}/mês`}>
-                <div className="rounded-2xl border border-border bg-[#F7F3EE] px-4 py-3 font-medium">{SINGLE_PLAN_LABEL}</div>
-              </Field>
-              <div className="md:col-span-2">
-                <Field label="Tagline pública">
-                  <Input name="tagline" defaultValue={business?.tagline || ''} />
-                </Field>
-              </div>
-              <div className="md:col-span-2">
-                <Field label="Endereço">
-                  <Input name="address" defaultValue={business?.address || ''} />
-                </Field>
-              </div>
-              <div className="md:col-span-2">
-                <Field label="Descrição">
-                  <Textarea name="description" rows={5} defaultValue={business?.description || ''} />
-                </Field>
-              </div>
             </div>
+
+            <div className="rounded-2xl border border-primary/15 bg-primary-soft p-4">
+              <p className="text-sm font-medium">Plano comercial atual</p>
+              <p className="mt-1 text-sm text-muted">{SINGLE_PLAN_LABEL} • R$ {SINGLE_PLAN_PRICE.toFixed(2).replace('.', ',')}/mês. Esse valor é controlado por você, não pelo studio.</p>
+            </div>
+
+            <Field label="Endereço">
+              <Input name="address" defaultValue={business?.address || ''} />
+            </Field>
+
+            <Field label="Tagline">
+              <Input name="tagline" defaultValue={business?.tagline || ''} />
+            </Field>
+
+            <Field label="Descrição pública">
+              <Textarea name="description" rows={5} defaultValue={business?.description || ''} />
+            </Field>
 
             <SubmitButton>Salvar alterações do cliente</SubmitButton>
           </form>
         </SectionCard>
 
         <div className="space-y-6">
-          <SectionCard title="Responsável e conta" description="Visão operacional rápida da dona do negócio e do estado comercial atual.">
-            <div className="grid gap-4 md:grid-cols-2">
+          <SectionCard title="Responsável e assinatura" description="Informações principais do relacionamento com o cliente.">
+            <div className="space-y-4">
               <div>
                 <p className="text-sm text-muted">Responsável</p>
                 <p className="mt-1 font-medium">{owner?.full_name || '-'}</p>
@@ -146,41 +153,68 @@ export default async function AdminClienteDetalhePage({ params }: { params: Prom
                 <p className="text-sm text-muted">Criado em</p>
                 <p className="mt-1 font-medium">{formatDateBR(business?.created_at?.slice(0, 10))}</p>
               </div>
-              <div className="md:col-span-2 rounded-2xl border border-border bg-[#F7F3EE] p-4">
-                <p className="text-sm text-muted">Plano comercial</p>
-                <p className="mt-1 font-medium">{SINGLE_PLAN_LABEL}</p>
-                <p className="mt-1 text-sm text-muted">Valor definido: {currencyBRL(SINGLE_PLAN_PRICE)}/mês</p>
+              <div>
+                <p className="text-sm text-muted">Página pública</p>
+                <p className="mt-1 font-medium">{publicReady ? 'Pronta para divulgar' : 'Ainda incompleta'}</p>
               </div>
             </div>
           </SectionCard>
 
-          <SectionCard title="Últimos atendimentos" description="Ajuda a entender se o studio está operando e registrando atividade recente.">
-            <div className="space-y-3">
-              {appointments?.length ? (
-                appointments.map((item) => (
-                  <div key={item.id} className="rounded-2xl border border-border p-4">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <p className="font-medium">{(item.customers as { full_name?: string } | null)?.full_name || 'Cliente'}</p>
-                        <p className="text-sm text-muted">
-                          {(item.services as { name?: string } | null)?.name || 'Serviço'} • {formatDateBR(item.appointment_date)} às {item.appointment_time?.slice(0, 5)}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <StatusBadge status={item.status === 'completed' ? 'success' : item.status === 'confirmed' ? 'neutral' : 'danger'}>
-                          {statusLabel(item.status)}
-                        </StatusBadge>
-                        <p className="mt-2 text-sm font-medium">{currencyBRL(item.final_price)}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-muted">Sem atividade recente ainda.</p>
-              )}
-            </div>
+          <SectionCard title="Leitura rápida" description="Como esse cliente está avançando no uso da plataforma.">
+            <ul className="space-y-3 text-sm text-muted">
+              <li>• {servicesCount ? 'Já cadastrou serviços.' : 'Ainda precisa cadastrar serviços.'}</li>
+              <li>• {requestsCount ? 'Já recebeu solicitações públicas.' : 'Ainda não recebeu solicitações públicas.'}</li>
+              <li>• {appointmentsCount ? 'Já está usando agenda.' : 'Ainda não está usando agenda.'}</li>
+              <li>• {publicReady ? 'A página pública está minimamente pronta.' : 'Falta terminar a página pública antes de divulgar.'}</li>
+            </ul>
           </SectionCard>
         </div>
+      </div>
+
+      <div className="mt-8 grid gap-6 xl:grid-cols-2">
+        <SectionCard title="Últimos atendimentos" description="Atividade operacional recente do studio, sem mostrar valores financeiros.">
+          <div className="space-y-3">
+            {appointments?.length ? (
+              appointments.map((item) => (
+                <div key={item.id} className="rounded-2xl border border-border p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-medium">{(item.customers as { full_name?: string } | null)?.full_name || 'Cliente'}</p>
+                      <p className="text-sm text-muted">{(item.services as { name?: string } | null)?.name || 'Serviço'} • {formatDateBR(item.appointment_date)} às {item.appointment_time?.slice(0, 5)}</p>
+                    </div>
+                    <StatusBadge status={item.status === 'completed' ? 'success' : item.status === 'confirmed' ? 'neutral' : 'warning'}>
+                      {statusLabel(item.status)}
+                    </StatusBadge>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted">Sem atividade recente ainda.</p>
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard title="Últimas solicitações" description="Leitura do interesse gerado pela página pública.">
+          <div className="space-y-3">
+            {latestRequests?.length ? (
+              latestRequests.map((item) => (
+                <div key={item.id} className="rounded-2xl border border-border p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="font-medium">{item.customer_name || 'Cliente'}</p>
+                      <p className="text-sm text-muted">{item.service_name || 'Serviço'} • {formatDateBR(item.preferred_date)} às {item.preferred_time?.slice(0, 5)}</p>
+                    </div>
+                    <StatusBadge status={item.status === 'approved' ? 'success' : item.status === 'pending' ? 'warning' : 'danger'}>
+                      {statusLabel(item.status)}
+                    </StatusBadge>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted">Ainda não existem solicitações recentes.</p>
+            )}
+          </div>
+        </SectionCard>
       </div>
     </div>
   );
