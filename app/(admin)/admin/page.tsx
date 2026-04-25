@@ -31,7 +31,9 @@ export default async function AdminDashboard() {
         <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <h3 className="text-2xl font-serif">{SINGLE_PLAN_LABEL}</h3>
-            <p className="mt-1 text-sm text-muted">Preço definido: {currencyBRL(SINGLE_PLAN_PRICE)}/mês. O admin acompanha assinatura e uso da plataforma, não o caixa do studio.</p>
+            <p className="mt-1 text-sm text-muted">
+              Preço definido: {currencyBRL(SINGLE_PLAN_PRICE)}/mês. O admin acompanha assinatura e uso da plataforma, não o caixa do studio.
+            </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-white/60 bg-white p-4">
@@ -64,7 +66,11 @@ export default async function AdminDashboard() {
         <SectionCard
           title="Clientes mais engajados"
           description="Quem mais avançou na ativação da plataforma."
-          action={<Link href="/admin/clientes" className="text-sm font-medium text-primary">Ver todos</Link>}
+          action={
+            <Link href="/admin/clientes" className="text-sm font-medium text-primary">
+              Ver todos
+            </Link>
+          }
         >
           <div className="space-y-3">
             {topBusinesses.length ? (
@@ -113,11 +119,13 @@ export default async function AdminDashboard() {
                     </StatusBadge>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted">
-                    {item.needsAttention.map((reason: string) => (
-                      <span key={reason} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-900">
-                        {reason}
-                      </span>
-                    ))}
+                    {item.needsAttention
+                      .filter((reason): reason is string => Boolean(reason))
+                      .map((reason) => (
+                        <span key={reason} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-900">
+                          {reason}
+                        </span>
+                      ))}
                   </div>
                 </div>
               ))
@@ -137,7 +145,9 @@ export default async function AdminDashboard() {
                   <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div>
                       <p className="font-medium">{item.business_name}</p>
-                      <p className="text-sm text-muted">{item.city || 'Sem cidade'} • criado em {formatDateBR(item.created_at?.slice(0, 10))}</p>
+                      <p className="text-sm text-muted">
+                        {item.city || 'Sem cidade'} • criado em {formatDateBR(item.created_at?.slice(0, 10))}
+                      </p>
                     </div>
                     <div className="flex items-center gap-3">
                       <StatusBadge status={item.status === 'active' ? 'success' : item.status === 'trial' ? 'warning' : 'danger'}>
