@@ -82,7 +82,8 @@ export default async function BookingPage({
             Escolha serviço, data disponível e envie sua solicitação
           </h1>
           <p className="mt-4 max-w-3xl text-base leading-7 text-muted">
-            Os horários abaixo já respeitam o funcionamento configurado pelo studio e evitam conflitos com a agenda atual.
+            Os horários abaixo já respeitam o funcionamento configurado pelo studio e evitam
+            conflitos com a agenda atual.
           </p>
 
           {success && (
@@ -105,17 +106,21 @@ export default async function BookingPage({
 
             <div className="rounded-[1.5rem] border border-border bg-surface p-5 shadow-soft">
               <p className="text-sm text-muted">Atendimento</p>
-              <p className="mt-2 text-lg font-semibold">{business.city || 'Atendimento presencial'}</p>
+              <p className="mt-2 text-lg font-semibold">
+                {business.city || 'Atendimento presencial'}
+              </p>
               {business.address && <p className="mt-1 text-sm text-muted">{business.address}</p>}
             </div>
 
             <div className="rounded-[1.5rem] border border-border bg-surface p-5 shadow-soft">
               <p className="text-sm text-muted">Regras da agenda</p>
               <p className="mt-2 text-sm text-text">
-                Antecedência mínima: <span className="font-semibold">{business.booking_lead_time_hours || 2}h</span>
+                Antecedência mínima:{' '}
+                <span className="font-semibold">{business.booking_lead_time_hours || 2}h</span>
               </p>
               <p className="mt-1 text-sm text-text">
-                Janela de reserva: <span className="font-semibold">{business.booking_window_days || 30} dias</span>
+                Janela de reserva:{' '}
+                <span className="font-semibold">{business.booking_window_days || 30} dias</span>
               </p>
             </div>
           </div>
@@ -164,7 +169,8 @@ export default async function BookingPage({
 
           <div className="rounded-[2rem] border border-border bg-surface p-7 shadow-soft">
             <BookingForm
-              business={business}
+              businessId={business.id}
+              returnTo={`/${business.slug}/agendar`}
               services={services}
               calendars={calendars}
               action={handleCreatePublicBookingRequest}
