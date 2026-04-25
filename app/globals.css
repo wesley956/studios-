@@ -3,31 +3,47 @@
 @tailwind utilities;
 
 :root {
-  --background: #F7F2EC;
-  --surface: #FFFFFF;
-  --text: #2F2623;
-  --muted: #7B6E68;
-  --primary: #B58A6A;
-  --primary-soft: #EAD8CB;
-  --border: #E7DDD5;
+  --background: #f7f2ec;
+  --surface: #ffffff;
+  --text: #2f2623;
+  --muted: #7b6e68;
+  --primary: #b58a6a;
+  --primary-soft: #ead8cb;
+  --border: #e7ddd5;
+  --dark: #1e1a18;
+
+  --theme-bg: var(--background);
+  --theme-surface: var(--surface);
+  --theme-surface-alt: #f4ece6;
+  --theme-text: var(--text);
+  --theme-muted: var(--muted);
+  --theme-primary: var(--primary);
+  --theme-primary-soft: var(--primary-soft);
+  --theme-border: var(--border);
+  --theme-accent: var(--dark);
+  --theme-ring: var(--primary);
 }
 
 * {
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
 }
 
 body {
-  background: var(--background);
-  color: var(--text);
+  background: var(--theme-bg);
+  color: var(--theme-text);
   font-family: var(--font-inter), sans-serif;
 }
 
-h1, h2, h3, h4 {
+h1,
+h2,
+h3,
+h4 {
   font-family: var(--font-playfair), serif;
 }
 
@@ -36,6 +52,69 @@ a {
   text-decoration: none;
 }
 
-button, input, select, textarea {
+button,
+input,
+select,
+textarea {
   font: inherit;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--theme-primary) 22%, white);
+  color: var(--theme-text);
+}
+
+input,
+select,
+textarea {
+  background: var(--theme-surface);
+  color: var(--theme-text);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--theme-muted);
+}
+
+.theme-surface {
+  background: var(--theme-surface);
+}
+
+.theme-surface-alt {
+  background: var(--theme-surface-alt);
+}
+
+.theme-border {
+  border-color: var(--theme-border);
+}
+
+.theme-text {
+  color: var(--theme-text);
+}
+
+.theme-muted {
+  color: var(--theme-muted);
+}
+
+.theme-primary {
+  color: var(--theme-primary);
+}
+
+.theme-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-ring) 18%, transparent);
+}
+
+.public-hero-overlay {
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--theme-primary) 18%, transparent), transparent 35%),
+    linear-gradient(135deg, color-mix(in srgb, var(--theme-primary-soft) 90%, white) 0%, var(--theme-bg) 100%);
+}
+
+.barber-texture {
+  background-image:
+    linear-gradient(135deg, rgba(255,255,255,0.02) 25%, transparent 25%),
+    linear-gradient(225deg, rgba(255,255,255,0.02) 25%, transparent 25%);
+  background-size: 18px 18px;
+  background-position: 0 0, 9px 9px;
 }
