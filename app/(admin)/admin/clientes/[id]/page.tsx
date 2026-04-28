@@ -127,12 +127,17 @@ function getBillingVisual(subscription: SubscriptionRow | null) {
 }
 
 export default async function AdminClienteDetalhePage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ error?: string; success?: string }>;
 }) {
   await requireAdmin();
   const { id } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const errorMessage = typeof resolvedSearchParams?.error === 'string' ? resolvedSearchParams.error : null;
+  const successMessage = typeof resolvedSearchParams?.success === 'string' ? resolvedSearchParams.success : null;
   const supabase = await createClient();
   const { month, year } = getCurrentReference();
 
@@ -159,7 +164,7 @@ export default async function AdminClienteDetalhePage({
     supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('business_id', id),
     supabase
       .from('booking_requests')
-      .select('id, preferred_date, preferred_time, status, service_name, customer_name')
+      .select('id, requested_date, requested_time, status, customer_name, services(name)')
       .eq('business_id', id)
       .order('created_at', { ascending: false })
       .limit(5),
@@ -200,6 +205,15 @@ export default async function AdminClienteDetalhePage({
       (appointmentsCount ? 30 : 0)
   );
 
+  const latestRequestRows = (latestRequests || []) as unknown as Array<{
+    id: string;
+    customer_name: string | null;
+    requested_date: string | null;
+    requested_time: string | null;
+    status: string;
+    services: { name?: string | null } | { name?: string | null }[] | null;
+  }>;
+
   const subscriptionRows = (subscriptions || []) as SubscriptionRow[];
   const currentSubscription =
     subscriptionRows.find((item) => item.reference_month === month && item.reference_year === year) || null;
@@ -227,6 +241,20 @@ export default async function AdminClienteDetalhePage({
           ) : null
         }
       />
+
+      {successMessage ? (
+        <div className="mb-6 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm leading-6 text-green-700">
+          {successMessage}
+        </div>
+      ) : null}
+
+      {errorMessage ? (
+        <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">
+          <strong>Não foi possível concluir a ação.</strong>
+          <br />
+          {errorMessage}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Serviços" value={servicesCount || 0} hint="Catálogo ativo" />
@@ -622,30 +650,34 @@ export default async function AdminClienteDetalhePage({
 
         <SectionCard title="Últimas solicitações" description="Interesse gerado pela página pública do studio.">
           <div className="space-y-3">
-            {latestRequests?.length ? (
-              latestRequests.map((item) => (
-                <div key={item.id} className="rounded-2xl border border-border p-4">
-                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <p className="font-medium">{item.customer_name || 'Cliente'}</p>
-                      <p className="text-sm text-muted">
-                        {item.service_name || 'Serviço'} • {formatDateBR(item.preferred_date)} às {item.preferred_time?.slice(0, 5)}
-                      </p>
+            {latestRequestRows.length ? (
+              latestRequestRows.map((item) => {
+                const service = Array.isArray(item.services) ? item.services[0] : item.services;
+
+                return (
+                  <div key={item.id} className="rounded-2xl border border-border p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <p className="font-medium">{item.customer_name || 'Cliente'}</p>
+                        <p className="text-sm text-muted">
+                          {service?.name || 'Serviço'} • {formatDateBR(item.requested_date)} às {item.requested_time?.slice(0, 5)}
+                        </p>
+                      </div>
+                      <StatusBadge
+                        status={
+                          item.status === 'approved'
+                            ? 'success'
+                            : item.status === 'pending'
+                              ? 'warning'
+                              : 'danger'
+                        }
+                      >
+                        {statusLabel(item.status)}
+                      </StatusBadge>
                     </div>
-                    <StatusBadge
-                      status={
-                        item.status === 'approved'
-                          ? 'success'
-                          : item.status === 'pending'
-                            ? 'warning'
-                            : 'danger'
-                      }
-                    >
-                      {statusLabel(item.status)}
-                    </StatusBadge>
                   </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <p className="text-sm text-muted">Ainda não existem solicitações recentes.</p>
             )}
