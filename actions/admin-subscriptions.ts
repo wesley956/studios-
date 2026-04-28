@@ -2,7 +2,6 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireAdmin } from '@/lib/auth';
-import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { SINGLE_PLAN_PRICE } from '@/lib/validations/business';
 
@@ -75,10 +74,9 @@ export async function ensureCurrentMonthSubscription(formData: FormData): Promis
   const { month, year } = getCurrentReference();
   const dueDate = normalizeString(formData.get('dueDate')) || getDefaultDueDate(month, year);
 
-  const supabase = await createClient();
   const admin = createAdminClient();
 
-  const { data: business, error: businessError } = await supabase
+  const { data: business, error: businessError } = await admin
     .from('businesses')
     .select('id')
     .eq('id', businessId)
