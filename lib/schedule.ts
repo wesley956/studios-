@@ -2,6 +2,7 @@ import type { BusinessHour } from '@/types/app';
 import { addDays, dateToISO, formatTime } from '@/lib/utils';
 
 export type AppointmentSlot = {
+  id?: string;
   appointment_date: string;
   appointment_time: string;
   end_time?: string | null;
