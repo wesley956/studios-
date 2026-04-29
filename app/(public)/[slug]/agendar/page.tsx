@@ -1,23 +1,52 @@
 import { notFound } from 'next/navigation';
 import { createPublicBookingRequest } from '@/actions/public-bookings';
-import { createClient } from '@/lib/supabase/server';
-import { buildBookingCalendar } from '@/lib/schedule';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { buildBookingCalendar, calculateEndTime, type AppointmentSlot } from '@/lib/schedule';
 import { buildThemeStyleVars, getSuggestedThemeByBusinessType } from '@/lib/themes';
 import { currencyBRL, whatsappLink } from '@/lib/utils';
 import BookingForm from './booking-form';
+
+type PendingRequestSlot = {
+  id?: string;
+  requested_date: string;
+  requested_time: string;
+  status?: string | null;
+  services?: { duration_minutes?: number | null } | { duration_minutes?: number | null }[] | null;
+};
+
+function getPendingRequestDuration(request: PendingRequestSlot) {
+  const service = Array.isArray(request.services) ? request.services[0] : request.services;
+  return Number(service?.duration_minutes || 60);
+}
+
+function pendingRequestsToBusySlots(requests: PendingRequestSlot[]): AppointmentSlot[] {
+  return requests.map((request) => {
+    const durationMinutes = getPendingRequestDuration(request);
+
+    return {
+      id: request.id,
+      appointment_date: request.requested_date,
+      appointment_time: request.requested_time,
+      end_time: calculateEndTime(request.requested_time, durationMinutes),
+      duration_minutes: durationMinutes,
+      status: request.status || 'pending'
+    };
+  });
+}
 
 export default async function BookingPage({
   params,
   searchParams
 }: {
   params: Promise<{ slug: string }>;
-  searchParams?: Promise<{ success?: string }>;
+  searchParams?: Promise<{ success?: string; error?: string }>;
 }) {
   const { slug } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const success = resolvedSearchParams?.success === '1';
+  const errorMessage = typeof resolvedSearchParams?.error === 'string' ? resolvedSearchParams.error : null;
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: business } = await supabase
     .from('businesses')
@@ -28,7 +57,7 @@ export default async function BookingPage({
 
   if (!business) notFound();
 
-  const [{ data: services }, { data: businessHours }, { data: appointments }] = await Promise.all([
+  const [{ data: services }, { data: businessHours }, { data: appointments }, { data: pendingRequests }] = await Promise.all([
     supabase
       .from('services')
       .select('id, name, price, duration_minutes')
@@ -38,9 +67,15 @@ export default async function BookingPage({
     supabase.from('business_hours').select('*').eq('business_id', business.id),
     supabase
       .from('appointments')
-      .select('appointment_date, appointment_time, end_time, duration_minutes, status')
+      .select('id, appointment_date, appointment_time, end_time, duration_minutes, status')
       .eq('business_id', business.id)
-      .gte('appointment_date', new Date().toISOString().slice(0, 10))
+      .gte('appointment_date', new Date().toISOString().slice(0, 10)),
+    supabase
+      .from('booking_requests')
+      .select('id, requested_date, requested_time, status, services(duration_minutes)')
+      .eq('business_id', business.id)
+      .gte('requested_date', new Date().toISOString().slice(0, 10))
+      .in('status', ['pending', 'rescheduled'])
   ]);
 
   if (!services?.length) notFound();
@@ -50,6 +85,11 @@ export default async function BookingPage({
     await createPublicBookingRequest(formData);
   }
 
+  const busySlots = [
+    ...((appointments || []) as AppointmentSlot[]),
+    ...pendingRequestsToBusySlots((pendingRequests || []) as PendingRequestSlot[])
+  ];
+
   const calendars = Object.fromEntries(
     services.map((service) => [
       service.id,
@@ -58,7 +98,7 @@ export default async function BookingPage({
         durationMinutes: Number(service.duration_minutes || 60),
         slotIntervalMinutes: Number(business.booking_interval_minutes || 15),
         hours: businessHours || [],
-        appointments: appointments || [],
+        appointments: busySlots,
         leadTimeHours: Number(business.booking_lead_time_hours || 2)
       })
     ])
@@ -83,7 +123,7 @@ export default async function BookingPage({
           </h1>
           <p className="mt-4 max-w-3xl text-base leading-7 text-muted">
             Os horários abaixo já respeitam o funcionamento configurado pelo studio e evitam
-            conflitos com a agenda atual.
+            conflitos com a agenda atual e com solicitações que ainda estão pendentes.
           </p>
 
           {success && (
@@ -92,6 +132,13 @@ export default async function BookingPage({
               <p className="mt-1 text-sm">
                 Em breve o studio entrará em contato para confirmar seu atendimento.
               </p>
+            </div>
+          )}
+
+          {errorMessage && (
+            <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-800">
+              <p className="font-medium">Não foi possível enviar a solicitação.</p>
+              <p className="mt-1 text-sm">{errorMessage}</p>
             </div>
           )}
 
@@ -109,7 +156,7 @@ export default async function BookingPage({
               <p className="mt-2 text-lg font-semibold">
                 {business.city || 'Atendimento presencial'}
               </p>
-              {business.address && <p className="mt-1 text-sm text-muted">{business.address}</p>}
+              {business.address && business.show_address !== false && <p className="mt-1 text-sm text-muted">{business.address}</p>}
             </div>
 
             <div className="rounded-[1.5rem] border border-border bg-surface p-5 shadow-soft">
@@ -118,6 +165,7 @@ export default async function BookingPage({
                 Antecedência mínima:{' '}
                 <span className="font-semibold">{business.booking_lead_time_hours || 2}h</span>
               </p>
+              {business.booking_rules ? <p className="mt-2 text-sm text-muted">{business.booking_rules}</p> : null}
               <p className="mt-1 text-sm text-text">
                 Janela de reserva:{' '}
                 <span className="font-semibold">{business.booking_window_days || 30} dias</span>
@@ -146,7 +194,7 @@ export default async function BookingPage({
                       <p className="font-medium">{service.name}</p>
                       <p className="mt-2 text-sm text-muted">{service.duration_minutes} min</p>
                     </div>
-                    <p className="text-lg font-semibold">{currencyBRL(service.price)}</p>
+                    {business.show_prices !== false ? <p className="text-lg font-semibold">{currencyBRL(service.price)}</p> : null}
                   </div>
                 </div>
               ))}

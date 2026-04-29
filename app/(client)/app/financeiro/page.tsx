@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { EmptyState, SectionCard, StatCard, StatusBadge, TopHeading } from '@/components/shared/shell';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentBusiness, requireClientOwner } from '@/lib/auth';
@@ -67,6 +68,16 @@ export default async function FinanceiroPage({
       <TopHeading
         title="Financeiro"
         description="Veja quanto entrou, o que ainda está pendente e como o dinheiro está chegando no seu studio."
+        action={
+          <div className="flex flex-wrap gap-3">
+            <Link href="/app/financeiro/export" className="rounded-2xl border border-border bg-white px-5 py-3 text-sm font-medium">
+              Exportar CSV
+            </Link>
+            <Link href="/app/financeiro/relatorio" className="rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-white">
+              Relatório/PDF
+            </Link>
+          </div>
+        }
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

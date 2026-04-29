@@ -13,3 +13,5 @@ export type BusinessHour = {
   open_time: string;
   close_time: string;
 };
+
+export type CustomerTag = 'vip' | 'recorrente' | 'retorno' | 'sumida' | 'aniversario' | 'preferencial';

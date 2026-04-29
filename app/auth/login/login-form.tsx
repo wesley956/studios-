@@ -98,8 +98,12 @@ export default function LoginForm() {
       </div>
 
       <div className="mt-6 flex flex-wrap gap-3 text-sm">
+        <Link href="/auth/esqueci-senha" className="font-medium text-primary transition hover:opacity-80">
+          Esqueci minha senha
+        </Link>
+        <span className="text-muted">•</span>
         <Link href="/" className="font-medium text-primary transition hover:opacity-80">
-          Voltar para a apresentação
+          Voltar para o portal
         </Link>
       </div>
     </div>

@@ -183,11 +183,7 @@ export default async function AdminClienteDetalhePage({
       .order('reference_month', { ascending: false })
   ]);
 
-  if (businessError) {
-    throw new Error(businessError.message);
-  }
-
-  if (!business) {
+  if (businessError || !business) {
     notFound();
   }
 

@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server';
 import { calculateEndTime, appointmentsOverlap, isWithinBusinessHours } from '@/lib/schedule';
 import { getCurrentBusiness } from '@/lib/auth';
 import { parseMoney } from '@/lib/utils';
+import { logAuditEvent } from '@/lib/audit';
 
 const SOLICITACOES_PATH = '/app/solicitacoes';
 const AGENDA_PATH = '/app/agenda';
@@ -179,6 +180,15 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
     failOnSolicitacoes(`O agendamento foi criado, mas a solicitação não foi atualizada: ${updateError.message}`);
   }
 
+  await logAuditEvent({
+    businessId: business.id,
+    actorId: business.owner_id,
+    action: 'booking_request.approved',
+    entityType: 'booking_request',
+    entityId: request.id,
+    metadata: { appointmentId: appointment.id, date: confirmedDate, time: confirmedTime }
+  });
+
   revalidatePath('/app/solicitacoes');
   revalidatePath('/app/agenda');
   revalidatePath('/app');
@@ -206,6 +216,14 @@ export async function cancelBookingRequest(formData: FormData): Promise<void> {
   if (error) {
     failOnSolicitacoes(error.message);
   }
+
+  await logAuditEvent({
+    businessId: business.id,
+    actorId: business.owner_id,
+    action: 'booking_request.cancelled',
+    entityType: 'booking_request',
+    entityId: requestId
+  });
 
   revalidatePath('/app/solicitacoes');
   revalidatePath('/app');
@@ -358,6 +376,30 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
       }
     }
   }
+
+  if (status === 'completed' && appointment.customer_id) {
+    const completedBase = new Date(`${nextDate}T00:00:00`);
+    const nextFollowUp = new Date(completedBase);
+    nextFollowUp.setDate(completedBase.getDate() + 30);
+
+    await supabase
+      .from('customers')
+      .update({
+        next_follow_up_date: nextFollowUp.toISOString().slice(0, 10),
+        last_contacted_at: new Date().toISOString()
+      })
+      .eq('id', appointment.customer_id)
+      .eq('business_id', business.id);
+  }
+
+  await logAuditEvent({
+    businessId: business.id,
+    actorId: business.owner_id,
+    action: 'appointment.updated',
+    entityType: 'appointment',
+    entityId: appointment.id,
+    metadata: { status, date: nextDate, time: nextTime, paymentStatus }
+  });
 
   revalidatePath('/app/agenda');
   revalidatePath('/app');

@@ -4,7 +4,8 @@ import { Field, Input, Select, SubmitButton, Textarea } from '@/components/share
 import { updateBusinessSettings } from '@/actions/client-settings';
 import { createClient } from '@/lib/supabase/server';
 import { DEFAULT_BUSINESS_HOURS } from '@/lib/schedule';
-import { BUSINESS_TYPE_OPTIONS, THEME_OPTIONS, getSuggestedThemeByBusinessType } from '@/lib/themes';
+import { BUSINESS_TYPE_OPTIONS, getSuggestedThemeByBusinessType } from '@/lib/themes';
+import { ThemeRadioGrid } from '@/components/shared/theme-picker';
 
 const weekdays = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
@@ -93,18 +94,15 @@ export default async function ConfiguracoesPage({ searchParams }: ConfiguracoesP
                 ))}
               </Select>
             </Field>
-
-            <Field label="Tema visual">
-              <Select
+            <Field
+              label="Tema visual"
+              className="md:col-span-2"
+              hint="Escolha uma paleta para a página pública. Agora há opções claras, escuras, clínicas, premium e modernas."
+            >
+              <ThemeRadioGrid
                 name="themeKey"
                 defaultValue={business.theme_key || getSuggestedThemeByBusinessType(business.business_type)}
-              >
-                {THEME_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
+              />
             </Field>
 
             <Field label="Cidade">
@@ -227,6 +225,71 @@ export default async function ConfiguracoesPage({ searchParams }: ConfiguracoesP
           >
             <Textarea name="publicNote" rows={3} defaultValue={business.public_note || ''} />
           </Field>
+        </SectionCard>
+
+
+
+        <SectionCard
+          title="Informações comerciais da página pública"
+          description="Controle o que aparece para clientes finais: mapa, regras, formas de pagamento e textos prontos para divulgação."
+        >
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label="Link do mapa" hint="Cole o link do Google Maps, Waze ou endereço compartilhável.">
+              <Input name="mapUrl" defaultValue={business.map_url || ''} placeholder="https://maps.google.com/..." />
+            </Field>
+
+            <Field label="Texto do botão principal" hint="Ex.: Agendar horário, Quero marcar, Solicitar atendimento.">
+              <Input name="customCtaLabel" defaultValue={business.custom_cta_label || ''} placeholder="Agendar horário" />
+            </Field>
+
+            <Field label="Formas de pagamento" className="md:col-span-2" hint="Selecione as formas aceitas para aparecerem na página pública.">
+              <div className="grid gap-3 rounded-2xl border border-border bg-[var(--theme-surface-alt)] p-4 sm:grid-cols-2 lg:grid-cols-5">
+                {[
+                  ['pix', 'Pix'],
+                  ['cash', 'Dinheiro'],
+                  ['credit_card', 'Crédito'],
+                  ['debit_card', 'Débito'],
+                  ['transfer', 'Transferência']
+                ].map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      name="paymentMethods"
+                      value={value}
+                      defaultChecked={Array.isArray(business.payment_methods) && business.payment_methods.includes(value)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </Field>
+
+            <Field label="Política de cancelamento" className="md:col-span-2" hint="Ex.: remarcações com pelo menos 4h de antecedência.">
+              <Textarea name="cancellationPolicy" rows={3} defaultValue={business.cancellation_policy || ''} />
+            </Field>
+
+            <Field label="Regras antes de agendar" className="md:col-span-2" hint="Ex.: chegar 10 minutos antes, trazer referência, atendimento somente com confirmação.">
+              <Textarea name="bookingRules" rows={3} defaultValue={business.booking_rules || ''} />
+            </Field>
+
+            <Field label="Texto pronto para bio do Instagram" className="md:col-span-2">
+              <Textarea name="instagramBio" rows={3} defaultValue={business.instagram_bio || ''} />
+            </Field>
+
+            <Field label="Texto pronto para status do WhatsApp" className="md:col-span-2">
+              <Textarea name="whatsappStatusText" rows={3} defaultValue={business.whatsapp_status_text || ''} />
+            </Field>
+
+            <label className="flex items-center gap-2 rounded-2xl border border-border bg-[var(--theme-surface-alt)] p-4 text-sm">
+              <input type="checkbox" name="showPrices" defaultChecked={business.show_prices !== false} />
+              Mostrar valores dos serviços na página pública
+            </label>
+
+            <label className="flex items-center gap-2 rounded-2xl border border-border bg-[var(--theme-surface-alt)] p-4 text-sm">
+              <input type="checkbox" name="showAddress" defaultChecked={business.show_address !== false} />
+              Mostrar endereço na página pública
+            </label>
+          </div>
         </SectionCard>
 
         <SectionCard

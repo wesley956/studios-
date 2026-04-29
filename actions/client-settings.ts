@@ -8,7 +8,8 @@ import { businessSchema, SINGLE_PLAN_KEY } from '@/lib/validations/business';
 import { getCurrentBusiness } from '@/lib/auth';
 import { getSuggestedThemeByBusinessType } from '@/lib/themes';
 import { DEFAULT_BUSINESS_HOURS } from '@/lib/schedule';
-import { slugify } from '@/lib/utils';
+import { getAppUrl, slugify } from '@/lib/utils';
+import { logAuditEvent } from '@/lib/audit';
 
 const MEDIA_BUCKET = 'business-media';
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -157,6 +158,15 @@ export async function updateBusinessSettings(formData: FormData): Promise<void> 
       business_type: parsed.data.businessType,
       theme_key: parsed.data.themeKey,
       public_note: normalize(formData.get('publicNote')) || null,
+      payment_methods: formData.getAll('paymentMethods').map((item) => String(item)).filter(Boolean),
+      cancellation_policy: normalize(formData.get('cancellationPolicy')) || null,
+      booking_rules: normalize(formData.get('bookingRules')) || null,
+      show_prices: formData.get('showPrices') === 'on',
+      show_address: formData.get('showAddress') === 'on',
+      map_url: normalize(formData.get('mapUrl')) || null,
+      custom_cta_label: normalize(formData.get('customCtaLabel')) || null,
+      instagram_bio: normalize(formData.get('instagramBio')) || null,
+      whatsapp_status_text: normalize(formData.get('whatsappStatusText')) || null,
       logo_url: logoUrl,
       cover_url: coverUrl,
       booking_interval_minutes: Number.isFinite(slotInterval) ? slotInterval : 15,
@@ -245,6 +255,18 @@ export async function updateBusinessSettings(formData: FormData): Promise<void> 
       }
     }
   }
+
+  await logAuditEvent({
+    businessId: currentBusiness.id,
+    actorId: currentBusiness.owner_id,
+    action: 'business.updated',
+    entityType: 'business',
+    entityId: currentBusiness.id,
+    metadata: {
+      slug: parsed.data.slug,
+      publicUrl: `${getAppUrl()}/${parsed.data.slug}`
+    }
+  });
 
   revalidatePath('/app/configuracoes');
   revalidatePath('/app');

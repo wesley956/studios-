@@ -1,17 +1,19 @@
 import { requireAdmin } from '@/lib/auth';
 import { createClient } from '@/lib/supabase/server';
 import { SectionCard, StatCard, TopHeading } from '@/components/shared/shell';
+import { formatDateTimeBR } from '@/lib/utils';
 
 export default async function AdminUsoPage() {
   await requireAdmin();
   const supabase = await createClient();
 
-  const [{ data: businesses }, { data: services }, { data: requests }, { data: appointments }, { data: payments }] = await Promise.all([
+  const [{ data: businesses }, { data: services }, { data: requests }, { data: appointments }, { data: payments }, { data: auditLogs }] = await Promise.all([
     supabase.from('businesses').select('id, status'),
     supabase.from('services').select('business_id'),
     supabase.from('booking_requests').select('business_id'),
     supabase.from('appointments').select('business_id'),
-    supabase.from('payments').select('business_id, amount')
+    supabase.from('payments').select('business_id, amount'),
+    supabase.from('audit_logs').select('*, businesses(business_name), profiles(full_name, email)').order('created_at', { ascending: false }).limit(20)
   ]);
 
   const uniqueBusinesses = new Set((businesses || []).map((item) => item.id));
@@ -59,6 +61,31 @@ export default async function AdminUsoPage() {
           </ul>
         </SectionCard>
       </div>
+
+
+      <SectionCard className="mt-8" title="Auditoria recente" description="Últimas ações registradas no sistema para ajudar no suporte e investigação de mudanças.">
+        <div className="space-y-3">
+          {auditLogs?.length ? (
+            auditLogs.map((log) => (
+              <div key={log.id} className="rounded-2xl border border-border bg-[var(--theme-surface-alt)] p-4 text-sm">
+                <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="font-medium text-text">{log.action}</p>
+                    <p className="mt-1 text-muted">
+                      {(log.businesses as { business_name?: string } | null)?.business_name || 'Sem negócio'} • {(log.profiles as { full_name?: string; email?: string } | null)?.full_name || (log.profiles as { email?: string } | null)?.email || 'Sistema'}
+                    </p>
+                  </div>
+                  <span className="text-xs text-muted">{formatDateTimeBR(log.created_at)}</span>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="rounded-2xl border border-dashed border-border p-5 text-sm text-muted">
+              A auditoria começa a aparecer depois que clientes, agendamentos e configurações forem alterados.
+            </p>
+          )}
+        </div>
+      </SectionCard>
     </div>
   );
 }

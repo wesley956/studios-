@@ -19,7 +19,7 @@ const categories = [
 export default async function ServicosPage({
   searchParams
 }: {
-  searchParams?: Promise<{ q?: string }>; 
+  searchParams?: Promise<{ q?: string; success?: string; error?: string }>;  
 }) {
   await requireClientOwner();
   const business = await getCurrentBusiness();
@@ -64,6 +64,13 @@ export default async function ServicosPage({
   return (
     <div>
       <TopHeading title="Serviços" description="Cadastre, edite e organize o catálogo que aparece na página pública e alimenta o financeiro." />
+
+      {params?.success ? (
+        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">{params.success}</div>
+      ) : null}
+      {params?.error ? (
+        <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">{params.error}</div>
+      ) : null}
 
       <div className="mb-6 grid gap-4 md:grid-cols-[1fr,340px]">
         <SectionCard title="Buscar serviço" description="Encontre rapidamente um serviço pelo nome.">

@@ -115,7 +115,13 @@ export function statusLabel(value: string | null | undefined) {
     cash: 'Dinheiro',
     credit_card: 'Cartão de crédito',
     debit_card: 'Cartão de débito',
-    transfer: 'Transferência'
+    transfer: 'Transferência',
+    vip: 'VIP',
+    recorrente: 'Recorrente',
+    retorno: 'Retorno',
+    sumida: 'Sumida',
+    aniversario: 'Aniversário',
+    preferencial: 'Preferencial'
   };
 
   return dictionary[value || ''] || value || '-';
@@ -137,4 +143,10 @@ export function compactNumber(value: number | null | undefined) {
     compactDisplay: 'short',
     maximumFractionDigits: 1
   }).format(Number(value || 0));
+}
+
+export function getAppUrl() {
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return 'http://localhost:3000';
 }

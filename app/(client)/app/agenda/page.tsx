@@ -1,9 +1,11 @@
+import Link from 'next/link';
 import { updateAppointmentStatus } from '@/actions/client-bookings';
 import { Field, Input, SecondaryButton, Select, SubmitButton } from '@/components/shared/forms';
 import { EmptyState, SectionCard, StatusBadge, TopHeading } from '@/components/shared/shell';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentBusiness, requireClientOwner } from '@/lib/auth';
 import { currencyBRL, formatDateBR, formatTime, statusLabel } from '@/lib/utils';
+import { appointmentReminderMessage, buildWhatsappUrl } from '@/lib/whatsapp';
 
 const statusOptions = ['confirmed', 'completed', 'cancelled', 'no_show'] as const;
 
@@ -31,7 +33,7 @@ export default async function AgendaPage({
 
   let query = supabase
     .from('appointments')
-    .select('*, customers(full_name), services(name, price, duration_minutes)')
+    .select('*, customers(full_name, phone), services(name, price, duration_minutes)')
     .eq('business_id', business.id)
     .order('appointment_date', { ascending: true })
     .order('appointment_time', { ascending: true });
@@ -51,6 +53,16 @@ export default async function AgendaPage({
       <TopHeading
         title="Agenda"
         description="Gerencie horários, conclua atendimentos com pagamento em 1 clique e acompanhe o que ainda está pendente."
+        action={
+          <div className="flex flex-wrap gap-3">
+            <Link href="/app/agenda/export" className="rounded-2xl border border-border bg-white px-5 py-3 text-sm font-medium">
+              Exportar CSV
+            </Link>
+            <Link href="/app/agenda/relatorio" className="rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-white">
+              Relatório/PDF
+            </Link>
+          </div>
+        }
       />
 
       {successMessage ? (
@@ -99,7 +111,7 @@ export default async function AgendaPage({
           {appointments?.length ? (
             appointments.map((item) => {
               const service = item.services as { name?: string; price?: number; duration_minutes?: number } | null;
-              const customer = item.customers as { full_name?: string } | null;
+              const customer = item.customers as { full_name?: string; phone?: string } | null;
               const finalPrice = Number(item.final_price || service?.price || 0);
               const paidAmount = Number(item.paid_amount || 0);
 
@@ -133,6 +145,27 @@ export default async function AgendaPage({
 
                     <span className="text-sm text-primary group-open:hidden">Gerenciar</span>
                   </summary>
+
+                  {customer?.phone ? (
+                    <div className="mt-5 rounded-[1.5rem] border border-border bg-[var(--theme-surface-alt)] p-4">
+                      <p className="font-medium">WhatsApp rápido</p>
+                      <p className="mt-1 text-sm text-muted">Envie lembrete com data, horário e serviço já preenchidos.</p>
+                      <a
+                        href={buildWhatsappUrl(customer.phone, appointmentReminderMessage({
+                          businessName: business.business_name,
+                          customerName: customer.full_name || 'cliente',
+                          serviceName: service?.name || null,
+                          date: item.appointment_date,
+                          time: item.appointment_time
+                        }))}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-3 inline-flex rounded-2xl border border-border bg-white px-4 py-3 text-sm font-medium transition hover:bg-primary-soft"
+                      >
+                        Enviar lembrete
+                      </a>
+                    </div>
+                  ) : null}
 
                   <div className="mt-5 rounded-[1.5rem] border border-emerald-100 bg-emerald-50/70 p-4">
                     <p className="font-medium text-emerald-900">Ações rápidas</p>
