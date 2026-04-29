@@ -1,9 +1,50 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { bookingRequestSchema } from '@/lib/validations/booking';
-import { calculateEndTime, appointmentsOverlap, isWithinBusinessHours } from '@/lib/schedule';
+import { calculateEndTime, appointmentsOverlap, isWithinBusinessHours, type AppointmentSlot } from '@/lib/schedule';
+
+type RequestBusySlot = {
+  id?: string;
+  requested_date: string;
+  requested_time: string;
+  status?: string | null;
+  services?: { duration_minutes?: number | null } | { duration_minutes?: number | null }[] | null;
+};
+
+function buildRedirectUrl(returnTo: string, key: 'success' | 'error', message: string) {
+  const fallback = returnTo || '/';
+  return `${fallback}${fallback.includes('?') ? '&' : '?'}${key}=${encodeURIComponent(message)}`;
+}
+
+function fail(returnTo: string, message: string): never {
+  redirect(buildRedirectUrl(returnTo, 'error', message));
+}
+
+function success(returnTo: string): never {
+  redirect(buildRedirectUrl(returnTo, 'success', '1'));
+}
+
+function getRequestDurationMinutes(request: RequestBusySlot) {
+  const service = Array.isArray(request.services) ? request.services[0] : request.services;
+  return Number(service?.duration_minutes || 60);
+}
+
+function bookingRequestsToBusySlots(requests: RequestBusySlot[]): AppointmentSlot[] {
+  return requests.map((request) => {
+    const durationMinutes = getRequestDurationMinutes(request);
+
+    return {
+      id: request.id,
+      appointment_date: request.requested_date,
+      appointment_time: request.requested_time,
+      end_time: calculateEndTime(request.requested_time, durationMinutes),
+      duration_minutes: durationMinutes,
+      status: request.status || 'pending'
+    };
+  });
+}
 
 export async function createPublicBookingRequest(formData: FormData): Promise<void> {
   const returnTo = String(formData.get('returnTo') || '/');
@@ -19,10 +60,10 @@ export async function createPublicBookingRequest(formData: FormData): Promise<vo
   });
 
   if (!parsed.success) {
-    throw new Error(parsed.error.issues[0]?.message || 'Dados inválidos.');
+    fail(returnTo, parsed.error.issues[0]?.message || 'Dados inválidos. Confira as informações e tente novamente.');
   }
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data: business, error: businessError } = await supabase
     .from('businesses')
     .select('id, slug, status, booking_window_days, booking_lead_time_hours')
@@ -30,9 +71,11 @@ export async function createPublicBookingRequest(formData: FormData): Promise<vo
     .eq('status', 'active')
     .single();
 
-  if (businessError || !business) throw new Error('Negócio indisponível para agendamento.');
+  if (businessError || !business) {
+    fail(returnTo, 'Negócio indisponível para agendamento.');
+  }
 
-  const { data: service } = await supabase
+  const { data: service, error: serviceError } = await supabase
     .from('services')
     .select('id, business_id, duration_minutes, is_active')
     .eq('id', parsed.data.serviceId)
@@ -40,46 +83,61 @@ export async function createPublicBookingRequest(formData: FormData): Promise<vo
     .eq('is_active', true)
     .single();
 
-  if (!service) throw new Error('Serviço inválido para este studio.');
+  if (serviceError || !service) {
+    fail(returnTo, 'Serviço inválido para este studio.');
+  }
 
   const requestedAt = new Date(`${parsed.data.requestedDate}T${parsed.data.requestedTime}:00`);
   const maxDate = new Date();
   maxDate.setDate(maxDate.getDate() + Number(business.booking_window_days || 30));
 
   if (requestedAt.getTime() < Date.now() + Number(business.booking_lead_time_hours || 2) * 60 * 60 * 1000) {
-    throw new Error('Escolha um horário com antecedência mínima configurada pelo studio.');
+    fail(returnTo, 'Escolha um horário com antecedência mínima configurada pelo studio.');
   }
 
   if (requestedAt > maxDate) {
-    throw new Error('A data escolhida está fora da janela de agendamento disponível.');
+    fail(returnTo, 'A data escolhida está fora da janela de agendamento disponível.');
   }
 
-  const [{ data: appointments }, { data: businessHours }] = await Promise.all([
+  const [{ data: appointments }, { data: pendingRequests }, { data: businessHours }] = await Promise.all([
     supabase
       .from('appointments')
-      .select('appointment_date, appointment_time, end_time, duration_minutes, status')
+      .select('id, appointment_date, appointment_time, end_time, duration_minutes, status')
       .eq('business_id', business.id)
       .eq('appointment_date', parsed.data.requestedDate),
+    supabase
+      .from('booking_requests')
+      .select('id, requested_date, requested_time, status, services(duration_minutes)')
+      .eq('business_id', business.id)
+      .eq('requested_date', parsed.data.requestedDate)
+      .in('status', ['pending', 'rescheduled']),
     supabase.from('business_hours').select('*').eq('business_id', business.id)
   ]);
 
-  const endTime = calculateEndTime(parsed.data.requestedTime, Number(service.duration_minutes || 60));
+  const durationMinutes = Number(service.duration_minutes || 60);
+  const endTime = calculateEndTime(parsed.data.requestedTime, durationMinutes);
+
   if (!isWithinBusinessHours({
     date: parsed.data.requestedDate,
     time: parsed.data.requestedTime,
-    durationMinutes: Number(service.duration_minutes || 60),
+    durationMinutes,
     hours: businessHours || []
   })) {
-    throw new Error('Esse horário está fora do funcionamento do studio.');
+    fail(returnTo, 'Esse horário está fora do funcionamento do studio.');
   }
+
+  const busySlots = [
+    ...((appointments || []) as AppointmentSlot[]),
+    ...bookingRequestsToBusySlots((pendingRequests || []) as RequestBusySlot[])
+  ];
 
   if (appointmentsOverlap({
     date: parsed.data.requestedDate,
     startTime: parsed.data.requestedTime,
     endTime,
-    appointments: appointments || []
+    appointments: busySlots
   })) {
-    throw new Error('Esse horário acabou de ficar indisponível. Escolha outro.');
+    fail(returnTo, 'Esse horário já foi solicitado ou ocupado por outra pessoa. Escolha outro horário.');
   }
 
   const { error } = await supabase.from('booking_requests').insert({
@@ -94,7 +152,9 @@ export async function createPublicBookingRequest(formData: FormData): Promise<vo
     source: 'public_page'
   });
 
-  if (error) throw new Error('Não foi possível enviar a solicitação.');
+  if (error) {
+    fail(returnTo, error.message || 'Não foi possível enviar a solicitação.');
+  }
 
-  redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}success=1`);
+  success(returnTo);
 }
