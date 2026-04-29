@@ -272,6 +272,7 @@ export default async function AdminClienteDetalhePage({
         <SectionCard title="Dados do cliente" description="Edite status, dados do negócio e identidade do studio.">
           <form action={handleUpdateBusinessAdmin} className="space-y-4">
             <input type="hidden" name="businessId" value={business.id} />
+                      <input type="hidden" name="returnTo" value={`/admin/clientes/${business.id}`} />
             <input type="hidden" name="planName" value={SINGLE_PLAN_KEY} />
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -411,6 +412,7 @@ export default async function AdminClienteDetalhePage({
                     <form action={confirmSubscriptionPayment}>
                       <input type="hidden" name="subscriptionId" value={currentSubscription.id} />
                       <input type="hidden" name="businessId" value={business.id} />
+                      <input type="hidden" name="returnTo" value={`/admin/clientes/${business.id}`} />
                       <input type="hidden" name="amount" value={currentSubscription.amount} />
                       <input type="hidden" name="paymentMethod" value="pix" />
                       <SubmitButton>Confirmar pagamento</SubmitButton>
@@ -419,6 +421,7 @@ export default async function AdminClienteDetalhePage({
                     <form action={markSubscriptionPending}>
                       <input type="hidden" name="subscriptionId" value={currentSubscription.id} />
                       <input type="hidden" name="businessId" value={business.id} />
+                      <input type="hidden" name="returnTo" value={`/admin/clientes/${business.id}`} />
                       <input type="hidden" name="dueDate" value={currentSubscription.due_date} />
                       <SecondaryButton type="submit">Voltar para pendente</SecondaryButton>
                     </form>
@@ -426,6 +429,7 @@ export default async function AdminClienteDetalhePage({
 
                   <form action={ensureCurrentMonthSubscription}>
                     <input type="hidden" name="businessId" value={business.id} />
+                      <input type="hidden" name="returnTo" value={`/admin/clientes/${business.id}`} />
                     <SecondaryButton type="submit">Garantir cobrança do mês</SecondaryButton>
                   </form>
                 </div>
@@ -436,6 +440,7 @@ export default async function AdminClienteDetalhePage({
 
                 <form action={ensureCurrentMonthSubscription} className="mt-4">
                   <input type="hidden" name="businessId" value={business.id} />
+                      <input type="hidden" name="returnTo" value={`/admin/clientes/${business.id}`} />
                   <SubmitButton>Gerar mensalidade do mês</SubmitButton>
                 </form>
               </div>
@@ -448,6 +453,7 @@ export default async function AdminClienteDetalhePage({
         <SectionCard title="Criar cobrança manual" description="Registre mês anterior, ajuste ou cobrança específica.">
           <form action={createSubscriptionRecord} className="grid gap-4 md:grid-cols-2">
             <input type="hidden" name="businessId" value={business.id} />
+                      <input type="hidden" name="returnTo" value={`/admin/clientes/${business.id}`} />
 
             <Field label="Mês">
               <Input name="referenceMonth" type="number" min={1} max={12} defaultValue={month} />
@@ -461,7 +467,10 @@ export default async function AdminClienteDetalhePage({
               <Input name="amount" defaultValue={SINGLE_PLAN_PRICE.toFixed(2).replace('.', ',')} />
             </Field>
 
-            <Field label="Vencimento">
+            <Field
+              label="Vencimento"
+              hint="Se você mudar o mês ou ano e deixar este campo no padrão, o sistema ajusta automaticamente o vencimento para o dia 10 do mês escolhido."
+            >
               <Input
                 name="dueDate"
                 type="date"
@@ -527,6 +536,7 @@ export default async function AdminClienteDetalhePage({
                     <form action={updateSubscriptionRecord} className="grid gap-3 md:grid-cols-2">
                       <input type="hidden" name="subscriptionId" value={item.id} />
                       <input type="hidden" name="businessId" value={business.id} />
+                      <input type="hidden" name="returnTo" value={`/admin/clientes/${business.id}`} />
 
                       <Field label="Mês">
                         <Input name="referenceMonth" type="number" min={1} max={12} defaultValue={item.reference_month} />
@@ -580,27 +590,14 @@ export default async function AdminClienteDetalhePage({
                         <SubmitButton>Salvar</SubmitButton>
 
                         {item.status !== 'paid' ? (
-                          <form action={confirmSubscriptionPayment}>
-                            <input type="hidden" name="subscriptionId" value={item.id} />
-                            <input type="hidden" name="businessId" value={business.id} />
-                            <input type="hidden" name="amount" value={item.amount} />
-                            <input type="hidden" name="paymentMethod" value={item.payment_method || 'pix'} />
-                            <SubmitButton>Confirmar pagamento</SubmitButton>
-                          </form>
+                          <SubmitButton formAction={confirmSubscriptionPayment}>Confirmar pagamento</SubmitButton>
                         ) : (
-                          <form action={markSubscriptionPending}>
-                            <input type="hidden" name="subscriptionId" value={item.id} />
-                            <input type="hidden" name="businessId" value={business.id} />
-                            <input type="hidden" name="dueDate" value={item.due_date} />
-                            <SecondaryButton type="submit">Voltar pendente</SecondaryButton>
-                          </form>
+                          <SecondaryButton type="submit" formAction={markSubscriptionPending}>
+                            Voltar pendente
+                          </SecondaryButton>
                         )}
 
-                        <form action={deleteSubscriptionRecord}>
-                          <input type="hidden" name="subscriptionId" value={item.id} />
-                          <input type="hidden" name="businessId" value={business.id} />
-                          <DangerButton type="submit">Excluir</DangerButton>
-                        </form>
+                        <DangerButton type="submit" formAction={deleteSubscriptionRecord}>Excluir</DangerButton>
                       </div>
                     </form>
                   </div>
