@@ -22,7 +22,8 @@ import { SectionCard, StatCard, StatusBadge, TopHeading } from '@/components/sha
 import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
 import { formatDateBR, statusLabel } from '@/lib/utils';
-import { BUSINESS_TYPE_OPTIONS, THEME_OPTIONS } from '@/lib/themes';
+import { BUSINESS_TYPE_OPTIONS } from '@/lib/themes';
+import { ThemeRadioGrid } from '@/components/shared/theme-picker';
 import { SINGLE_PLAN_KEY, SINGLE_PLAN_LABEL, SINGLE_PLAN_PRICE } from '@/lib/validations/business';
 
 type BusinessRow = {
@@ -309,15 +310,12 @@ export default async function AdminClienteDetalhePage({
                   ))}
                 </Select>
               </Field>
-
-              <Field label="Tema visual">
-                <Select name="themeKey" defaultValue={business.theme_key || 'modern_neutral'}>
-                  {THEME_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
+              <Field
+                label="Tema visual"
+                className="md:col-span-2"
+                hint="Ajuste a identidade da página pública deste cliente com uma paleta mais forte, clara, escura ou premium."
+              >
+                <ThemeRadioGrid name="themeKey" defaultValue={business.theme_key || 'modern_neutral'} />
               </Field>
 
               <Field label="Status da conta">
