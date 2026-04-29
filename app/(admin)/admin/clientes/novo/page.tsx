@@ -2,12 +2,22 @@ import { createBusiness } from '@/actions/admin-businesses';
 import { Field, Input, Select, SubmitButton, Textarea } from '@/components/shared/forms';
 import { SectionCard, TopHeading } from '@/components/shared/shell';
 import { requireAdmin } from '@/lib/auth';
-import { BUSINESS_TYPE_OPTIONS, THEME_OPTIONS, getSuggestedThemeByBusinessType } from '@/lib/themes';
+import { BUSINESS_TYPE_OPTIONS, getSuggestedThemeByBusinessType } from '@/lib/themes';
+import { ThemeRadioGrid } from '@/components/shared/theme-picker';
 import { SINGLE_PLAN_KEY, SINGLE_PLAN_LABEL, SINGLE_PLAN_PRICE } from '@/lib/validations/business';
 import { currencyBRL } from '@/lib/utils';
 
-export default async function NovoClientePage() {
+type NovoClientePageProps = {
+  searchParams?: Promise<{
+    error?: string;
+  }>;
+};
+
+export default async function NovoClientePage({ searchParams }: NovoClientePageProps) {
   await requireAdmin();
+
+  const params = searchParams ? await searchParams : undefined;
+  const errorMessage = typeof params?.error === 'string' ? params.error : null;
 
   async function handleCreateBusiness(formData: FormData): Promise<void> {
     'use server';
@@ -20,6 +30,14 @@ export default async function NovoClientePage() {
         title="Criar novo cliente"
         description="Cadastre o acesso da dona do negócio e monte o studio já com plano único, tipo de negócio e tema visual inicial."
       />
+
+      {errorMessage ? (
+        <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">
+          <strong>Não foi possível criar o cliente.</strong>
+          <br />
+          {errorMessage}
+        </div>
+      ) : null}
 
       <form action={handleCreateBusiness} className="space-y-6">
         <SectionCard
@@ -47,19 +65,23 @@ export default async function NovoClientePage() {
 
         <SectionCard
           title="Responsável pelo studio"
-          description="Se você informar nome, e-mail e senha, o sistema já cria o acesso completo da dona do negócio."
+          description="Esses dados são obrigatórios, porque o sistema cria o login da dona do negócio junto com o cliente."
         >
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Nome da responsável">
-              <Input name="ownerName" placeholder="Ex.: Maria Oliveira" />
+              <Input name="ownerName" placeholder="Ex.: Maria Oliveira" required />
             </Field>
 
             <Field label="E-mail da responsável">
-              <Input name="ownerEmail" type="email" placeholder="cliente@studio.com" />
+              <Input name="ownerEmail" type="email" placeholder="cliente@studio.com" required />
             </Field>
 
-            <Field label="Senha inicial" className="md:col-span-2" hint="Essa senha poderá ser alterada depois pela cliente.">
-              <Input name="ownerPassword" type="password" placeholder="Defina uma senha inicial" />
+            <Field
+              label="Senha inicial"
+              className="md:col-span-2"
+              hint="Mínimo de 6 caracteres. Essa senha poderá ser alterada depois pela cliente."
+            >
+              <Input name="ownerPassword" type="password" placeholder="Defina uma senha inicial" minLength={6} required />
             </Field>
           </div>
         </SectionCard>
@@ -86,15 +108,12 @@ export default async function NovoClientePage() {
                 ))}
               </Select>
             </Field>
-
-            <Field label="Tema visual inicial" hint="A cliente poderá trocar depois nas configurações.">
-              <Select name="themeKey" defaultValue={getSuggestedThemeByBusinessType('studio_geral')}>
-                {THEME_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
+            <Field
+              label="Tema visual inicial"
+              className="md:col-span-2"
+              hint="Escolha uma identidade inicial. A cliente também poderá trocar depois nas configurações."
+            >
+              <ThemeRadioGrid name="themeKey" defaultValue={getSuggestedThemeByBusinessType('studio_geral')} />
             </Field>
 
             <Field label="Cidade">
