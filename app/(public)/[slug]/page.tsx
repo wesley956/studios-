@@ -1,8 +1,34 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { normalizeBusinessHours } from '@/lib/schedule';
 import { buildThemeStyleVars, getSuggestedThemeByBusinessType } from '@/lib/themes';
-import { currencyBRL, getInitials, whatsappLink } from '@/lib/utils';
+import { currencyBRL, formatTime, getInitials, whatsappLink } from '@/lib/utils';
+
+const weekdays = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+type Service = {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number | string | null;
+  duration_minutes: number | null;
+};
+
+type GalleryImage = {
+  id: string;
+  image_url: string;
+  sort_order: number | null;
+};
+
+function formatBusinessHourLabel(hour: {
+  is_open: boolean;
+  open_time: string;
+  close_time: string;
+}) {
+  if (!hour.is_open) return 'Fechado';
+  return `${formatTime(hour.open_time)} às ${formatTime(hour.close_time)}`;
+}
 
 export default async function PublicBusinessPage({
   params
@@ -10,7 +36,7 @@ export default async function PublicBusinessPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: business } = await supabase
     .from('businesses')
@@ -21,33 +47,33 @@ export default async function PublicBusinessPage({
 
   if (!business) notFound();
 
-  const [{ data: services }, { data: gallery }, { count: customersCount }] = await Promise.all([
+  const [{ data: services }, { data: gallery }, { data: businessHours }] = await Promise.all([
     supabase
       .from('services')
-      .select('*')
+      .select('id, name, description, price, duration_minutes')
       .eq('business_id', business.id)
       .eq('is_active', true)
       .order('created_at', { ascending: true }),
     supabase
       .from('gallery_images')
-      .select('*')
+      .select('id, image_url, sort_order')
       .eq('business_id', business.id)
       .order('sort_order', { ascending: true }),
     supabase
-      .from('customers')
-      .select('*', { count: 'exact', head: true })
+      .from('business_hours')
+      .select('*')
       .eq('business_id', business.id)
+      .order('day_of_week', { ascending: true })
   ]);
 
-  const highlightServices = services?.slice(0, 3) || [];
+  const activeServices = (services || []) as Service[];
+  const galleryImages = (gallery || []) as GalleryImage[];
+  const hours = normalizeBusinessHours(businessHours || []);
+  const openDays = hours.filter((hour) => hour.is_open);
   const themeKey = business.theme_key || getSuggestedThemeByBusinessType(business.business_type);
   const themeVars = buildThemeStyleVars(themeKey);
   const isBarber = business.business_type === 'barbearia';
-
-  const heroTitle =
-    business.business_type === 'barbearia'
-      ? 'Barbearia com presença forte e agendamento profissional'
-      : 'Página profissional com agendamento inteligente';
+  const instagramHandle = business.instagram ? String(business.instagram).replace('@', '') : null;
 
   return (
     <div
@@ -56,15 +82,15 @@ export default async function PublicBusinessPage({
     >
       <section className="public-hero-overlay border-b border-border">
         <div className="mx-auto max-w-7xl px-6 py-8 lg:px-8">
-          <div className="flex items-center justify-between gap-4">
+          <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <Link href="/" className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-surface text-lg font-semibold shadow-soft">
+              <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-border bg-surface text-lg font-semibold shadow-soft">
                 {business.logo_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={business.logo_url}
                     alt={business.business_name}
-                    className="h-full w-full rounded-2xl object-cover"
+                    className="h-full w-full object-cover"
                   />
                 ) : (
                   getInitials(business.business_name)
@@ -73,7 +99,7 @@ export default async function PublicBusinessPage({
 
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Studio+</p>
-                <p className="text-sm text-muted">{heroTitle}</p>
+                <p className="text-sm text-muted">{business.business_name}</p>
               </div>
             </Link>
 
@@ -95,18 +121,16 @@ export default async function PublicBusinessPage({
                   rel="noreferrer"
                   className="rounded-2xl border border-border bg-surface px-5 py-3 text-sm font-medium transition hover:bg-primary-soft"
                 >
-                  Falar no WhatsApp
+                  WhatsApp
                 </a>
               )}
             </div>
-          </div>
+          </header>
 
-          <div className="mt-10 grid gap-8 lg:grid-cols-[1.1fr,0.9fr] lg:items-center">
+          <div className="mt-10 grid gap-8 lg:grid-cols-[1.05fr,0.95fr] lg:items-center">
             <div>
               <p className="text-sm font-medium uppercase tracking-[0.18em] text-primary">
-                {business.business_type === 'barbearia'
-                  ? 'Atendimento com estilo'
-                  : 'Atendimento com hora marcada'}
+                Atendimento com hora marcada
               </p>
 
               <h1 className="mt-4 text-4xl font-serif leading-tight md:text-5xl">
@@ -116,20 +140,30 @@ export default async function PublicBusinessPage({
               <p className="mt-4 max-w-2xl text-base leading-7 text-muted md:text-lg">
                 {business.tagline ||
                   business.description ||
-                  'Atendimento com hora marcada, experiência premium e presença digital pronta para vender.'}
+                  'Escolha um serviço, confira os dias de funcionamento e solicite seu horário pela página.'}
               </p>
 
-              <div className="mt-6 flex flex-wrap gap-3">
-                <span className="rounded-full border border-border bg-surface px-4 py-2 text-sm">
-                  {services?.length || 0} serviços ativos
-                </span>
-                <span className="rounded-full border border-border bg-surface px-4 py-2 text-sm">
-                  {customersCount || 0}+ clientes atendidas
-                </span>
-                <span className="rounded-full border border-border bg-surface px-4 py-2 text-sm">
-                  {business.city || 'Atendimento com hora marcada'}
-                </span>
+              <div className="mt-6 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-border bg-surface p-4 shadow-soft">
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted">Localização</p>
+                  <p className="mt-2 text-sm font-medium">
+                    {business.address || business.city || 'Endereço não informado'}
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-border bg-surface p-4 shadow-soft">
+                  <p className="text-xs uppercase tracking-[0.16em] text-muted">Funcionamento</p>
+                  <p className="mt-2 text-sm font-medium">
+                    {openDays.length ? `${openDays.length} dias por semana` : 'Horários não informados'}
+                  </p>
+                </div>
               </div>
+
+              {business.public_note && (
+                <div className="mt-5 rounded-2xl border border-border bg-primary-soft p-4 text-sm leading-6 text-text">
+                  {business.public_note}
+                </div>
+              )}
             </div>
 
             <div className="rounded-[2rem] border border-border bg-surface p-4 shadow-soft">
@@ -138,11 +172,11 @@ export default async function PublicBusinessPage({
                 <img
                   src={business.cover_url}
                   alt={`Capa de ${business.business_name}`}
-                  className="h-[320px] w-full rounded-[1.5rem] object-cover"
+                  className="h-[340px] w-full rounded-[1.5rem] object-cover"
                 />
               ) : (
-                <div className="flex h-[320px] items-center justify-center rounded-[1.5rem] border border-dashed border-border bg-primary-soft p-8 text-center text-muted">
-                  Adicione uma capa bonita em Configurações para deixar sua página ainda mais premium.
+                <div className="flex h-[340px] items-center justify-center rounded-[1.5rem] border border-dashed border-border bg-primary-soft p-8 text-center text-muted">
+                  Foto de capa ainda não enviada.
                 </div>
               )}
             </div>
@@ -150,85 +184,25 @@ export default async function PublicBusinessPage({
         </div>
       </section>
 
-      <section className="mx-auto max-w-7xl px-6 py-12 lg:px-8">
-        <div className="grid gap-4 md:grid-cols-3">
-          {[
-            {
-              title: 'Agendamento rápido',
-              description: 'A cliente escolhe serviço, data disponível e horário real sem confusão.'
-            },
-            {
-              title: 'Presença profissional',
-              description: 'Página bonita, link próprio e apresentação alinhada ao tipo do seu negócio.'
-            },
-            {
-              title: 'Confirmação humana',
-              description: 'O pedido entra no painel e você aprova com segurança antes de confirmar.'
-            }
-          ].map((item) => (
-            <div
-              key={item.title}
-              className="rounded-[1.75rem] border border-border bg-surface p-6 shadow-soft"
-            >
-              <h2 className="text-xl font-serif">{item.title}</h2>
-              <p className="mt-3 text-sm leading-6 text-muted">{item.description}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-7xl px-6 py-4 lg:px-8">
-        <div className="grid gap-6 lg:grid-cols-[0.95fr,1.05fr]">
+      <section className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
+        <div className="grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
           <div className="rounded-[2rem] border border-border bg-surface p-7 shadow-soft">
-            <h2 className="text-2xl font-serif">Sobre o espaço</h2>
-            <p className="mt-4 text-sm leading-7 text-muted">
-              {business.description ||
-                'Atendimento personalizado, ambiente acolhedor e serviços pensados para valorizar sua beleza com conforto e organização.'}
-            </p>
-
-            {business.public_note && (
-              <div className="mt-5 rounded-2xl border border-border bg-primary-soft p-4 text-sm text-text">
-                {business.public_note}
-              </div>
-            )}
-
-            <div className="mt-6 flex flex-wrap gap-3 text-sm text-muted">
-              <span className="rounded-full border border-border px-4 py-2">
-                {business.city || 'Atendimento com hora marcada'}
-              </span>
-              {business.address && (
-                <span className="rounded-full border border-border px-4 py-2">{business.address}</span>
-              )}
-              {business.instagram && (
-                <span className="rounded-full border border-border px-4 py-2">
-                  @{String(business.instagram).replace('@', '')}
-                </span>
-              )}
-              {business.whatsapp && (
-                <span className="rounded-full border border-border px-4 py-2">
-                  WhatsApp: {business.whatsapp}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="rounded-[2rem] border border-border bg-surface p-7 shadow-soft">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="text-2xl font-serif">Serviços</h2>
-                <p className="mt-2 text-sm text-muted">O que você pode reservar agora mesmo.</p>
+                <h2 className="text-2xl font-serif">Serviços disponíveis</h2>
+                <p className="mt-2 text-sm text-muted">Veja os serviços, duração e valores antes de agendar.</p>
               </div>
 
               <Link
                 href={`/${business.slug}/agendar`}
-                className="rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-white transition hover:opacity-90"
+                className="rounded-2xl bg-primary px-5 py-3 text-center text-sm font-medium text-white transition hover:opacity-90"
               >
                 Solicitar horário
               </Link>
             </div>
 
             <div className="mt-6 grid gap-4">
-              {(services?.length ? services : []).map((service) => (
+              {activeServices.map((service) => (
                 <div
                   key={service.id}
                   className="rounded-[1.5rem] border border-border bg-[var(--theme-surface-alt)] p-5"
@@ -236,76 +210,112 @@ export default async function PublicBusinessPage({
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div>
                       <h3 className="text-lg font-medium">{service.name}</h3>
-                      <p className="mt-2 text-sm leading-6 text-muted">
-                        {service.description || 'Atendimento profissional com horário reservado.'}
-                      </p>
+                      {service.description && (
+                        <p className="mt-2 text-sm leading-6 text-muted">{service.description}</p>
+                      )}
                     </div>
 
-                    <div className="shrink-0 text-right">
-                      <p className="text-sm text-muted">{service.duration_minutes} min</p>
+                    <div className="shrink-0 text-left md:text-right">
+                      <p className="text-sm text-muted">{service.duration_minutes || 60} min</p>
                       <p className="mt-1 text-lg font-semibold">{currencyBRL(service.price)}</p>
                     </div>
                   </div>
                 </div>
               ))}
 
-              {!services?.length && (
+              {!activeServices.length && (
                 <div className="rounded-[1.5rem] border border-dashed border-border bg-[var(--theme-surface-alt)] p-6 text-sm text-muted">
-                  Em breve este studio publicará seus serviços aqui.
+                  Este negócio ainda não publicou serviços ativos.
                 </div>
               )}
             </div>
           </div>
-        </div>
-      </section>
 
-      <section className="mx-auto max-w-7xl px-6 py-12 lg:px-8">
-        <div className="rounded-[2rem] border border-border bg-surface p-7 shadow-soft">
-          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-            <div>
-              <h2 className="text-2xl font-serif">Galeria</h2>
+          <aside className="space-y-6">
+            <div className="rounded-[2rem] border border-border bg-surface p-7 shadow-soft">
+              <h2 className="text-2xl font-serif">Dias e horários</h2>
               <p className="mt-2 text-sm text-muted">
-                Mostre resultados, ambiente e identidade visual do seu espaço.
+                Confira quando o atendimento está disponível antes de solicitar seu horário.
               </p>
+
+              <div className="mt-6 grid gap-3">
+                {hours.map((hour) => (
+                  <div
+                    key={hour.day_of_week}
+                    className="flex items-center justify-between gap-4 rounded-2xl border border-border bg-[var(--theme-surface-alt)] px-4 py-3 text-sm"
+                  >
+                    <span className="font-medium">{weekdays[hour.day_of_week]}</span>
+                    <span className={hour.is_open ? 'text-text' : 'text-muted'}>
+                      {formatBusinessHourLabel(hour)}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <Link
-              href={`/${business.slug}/agendar`}
-              className="rounded-2xl border border-border bg-white px-5 py-3 text-sm font-medium transition hover:bg-primary-soft"
-            >
-              Quero reservar
-            </Link>
-          </div>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-3">
-            {(gallery?.length ? gallery : [{ id: '1' }, { id: '2' }, { id: '3' }]).map((item, index) => (
-              <div
-                key={typeof item.id === 'string' ? item.id : index}
-                className="overflow-hidden rounded-[1.5rem] border border-border bg-[var(--theme-surface-alt)]"
-              >
-                {'image_url' in item && item.image_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={item.image_url}
-                    alt={`Imagem ${index + 1} de ${business.business_name}`}
-                    className="h-72 w-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-72 items-center justify-center p-6 text-center text-sm text-muted">
-                    Espaço reservado para fotos do studio, resultados e ambiente.
-                  </div>
-                )}
+            <div className="rounded-[2rem] border border-border bg-surface p-7 shadow-soft">
+              <h2 className="text-2xl font-serif">Contato</h2>
+              <div className="mt-5 grid gap-3 text-sm text-muted">
+                {business.city && <p><span className="font-medium text-text">Cidade:</span> {business.city}</p>}
+                {business.address && <p><span className="font-medium text-text">Endereço:</span> {business.address}</p>}
+                {business.whatsapp && <p><span className="font-medium text-text">WhatsApp:</span> {business.whatsapp}</p>}
+                {instagramHandle && <p><span className="font-medium text-text">Instagram:</span> @{instagramHandle}</p>}
               </div>
-            ))}
-          </div>
+
+              {business.whatsapp && (
+                <a
+                  href={whatsappLink(
+                    business.whatsapp,
+                    `Olá! Vi a página do ${business.business_name} e gostaria de tirar uma dúvida.`
+                  )}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-6 inline-flex rounded-2xl border border-border bg-white px-5 py-3 text-sm font-medium transition hover:bg-primary-soft"
+                >
+                  Tirar dúvida no WhatsApp
+                </a>
+              )}
+            </div>
+          </aside>
         </div>
       </section>
+
+      {galleryImages.length > 0 && (
+        <section className="mx-auto max-w-7xl px-6 pb-10 lg:px-8">
+          <div className="rounded-[2rem] border border-border bg-surface p-7 shadow-soft">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-2xl font-serif">Fotos</h2>
+                <p className="mt-2 text-sm text-muted">
+                  Conheça um pouco mais do espaço, dos resultados e da identidade do atendimento.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              {galleryImages.map((item, index) => (
+                <div
+                  key={item.id || index}
+                  className="overflow-hidden rounded-[1.5rem] border border-border bg-[var(--theme-surface-alt)]"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={item.image_url}
+                    alt={`Foto ${index + 1} de ${business.business_name}`}
+                    className="h-72 w-full object-cover"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="mx-auto max-w-7xl px-6 pb-14 pt-2 lg:px-8">
         <div className="rounded-[2rem] border border-border bg-primary-soft p-8 text-center shadow-soft">
-          <h2 className="text-3xl font-serif">Pronta para reservar seu horário?</h2>
+          <h2 className="text-3xl font-serif">Quer reservar seu horário?</h2>
           <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-muted">
-            Escolha um serviço, veja datas disponíveis e envie sua solicitação em poucos passos.
+            Escolha um serviço, veja os horários disponíveis e envie sua solicitação para confirmação.
           </p>
 
           <div className="mt-6 flex flex-wrap justify-center gap-3">
