@@ -24,10 +24,25 @@ export const businessSchema = z.object({
   ]),
   themeKey: z.enum([
     'barber_dark',
+    'barber_blue',
+    'barber_green',
+    'black_gold',
     'beauty_soft',
+    'rose_lux',
+    'lilac_glow',
+    'nude_chic',
     'lux_gold',
     'clean_clinic',
-    'modern_neutral'
+    'clinic_blue',
+    'emerald_calm',
+    'modern_neutral',
+    'modern_dark',
+    'ocean_blue',
+    'royal_purple',
+    'terracotta',
+    'sunset_coral',
+    'mocha',
+    'graphite_cyan'
   ]),
   planName: z.literal(SINGLE_PLAN_KEY).default(SINGLE_PLAN_KEY),
   status: z.enum(['trial', 'active', 'blocked']).default('trial')
