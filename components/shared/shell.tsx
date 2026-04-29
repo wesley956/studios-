@@ -14,17 +14,17 @@ export function SidebarLayout({
   children: ReactNode;
   tone?: 'client' | 'admin';
 }) {
-  const badgeLabel = tone === 'admin' ? 'Painel admin' : 'Painel do studio';
-  const badgeClass =
-    tone === 'admin'
-      ? 'border-sky-200 bg-sky-50 text-sky-800'
-      : 'border-primary/20 bg-primary-soft text-primary';
+  const isAdmin = tone === 'admin';
+  const badgeLabel = isAdmin ? 'Painel admin' : 'Painel do studio';
+  const badgeClass = isAdmin
+    ? 'border-cyan-300/30 bg-cyan-300/10 text-cyan-100'
+    : 'border-primary/20 bg-primary-soft text-primary';
 
   return (
-    <div className="min-h-screen">
-      <div className="mx-auto grid min-h-screen max-w-[1600px] gap-6 px-4 py-4 lg:grid-cols-[300px,1fr] lg:px-6 lg:py-6">
+    <div className={cn('min-h-screen', isAdmin && 'admin-theme')}>
+      <div className="mx-auto grid min-h-screen max-w-[1600px] gap-6 px-4 py-4 lg:grid-cols-[320px,1fr] lg:px-6 lg:py-6">
         <aside className="rounded-[2rem] border border-border bg-surface p-5 shadow-soft">
-          <div className="rounded-[1.75rem] border border-border bg-[var(--theme-surface-alt)] p-5">
+          <div className={cn('rounded-[1.75rem] border border-border p-5', isAdmin ? 'admin-command-strip' : 'bg-[var(--theme-surface-alt)]')}>
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Studio+</p>
@@ -37,19 +37,46 @@ export function SidebarLayout({
             </div>
 
             <p className="mt-3 text-sm leading-6 text-muted">
-              Gestão bonita, rápida e pronta para vender.
+              {isAdmin
+                ? 'Comando central com contraste alto, atalhos claros e leitura mais objetiva.'
+                : 'Gestão bonita, rápida e pronta para vender.'}
             </p>
           </div>
 
+          {isAdmin ? (
+            <div className="mt-4 rounded-[1.35rem] border border-border bg-[var(--theme-surface-alt)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Mapa rápido</p>
+              <p className="mt-2 text-sm leading-6 text-muted">
+                Use os números do menu para localizar a seção sem precisar reler tudo.
+              </p>
+            </div>
+          ) : null}
+
           <nav className="mt-5 space-y-2">
-            {nav.map((item) => (
+            {nav.map((item, index) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className="block rounded-[1.5rem] border border-border bg-surface px-4 py-3 transition hover:bg-primary-soft"
+                className={cn(
+                  'block rounded-[1.5rem] border border-border bg-surface px-4 py-3 transition hover:bg-primary-soft',
+                  isAdmin && 'admin-nav-item'
+                )}
               >
-                <p className="font-medium text-text">{item.label}</p>
-                {item.helper ? <p className="mt-1 text-xs text-muted">{item.helper}</p> : null}
+                <div className="flex items-start gap-3">
+                  <span
+                    className={cn(
+                      'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border text-sm font-bold',
+                      isAdmin ? 'admin-nav-number' : 'border-primary/20 bg-primary-soft text-primary'
+                    )}
+                  >
+                    {index + 1}
+                  </span>
+
+                  <div>
+                    <p className="font-semibold text-text">{item.label}</p>
+                    {item.helper ? <p className="mt-1 text-xs leading-5 text-muted">{item.helper}</p> : null}
+                  </div>
+                </div>
               </Link>
             ))}
           </nav>
@@ -57,7 +84,7 @@ export function SidebarLayout({
           <form action={signOut} className="mt-5">
             <button
               type="submit"
-              className="w-full rounded-[1.5rem] border border-border bg-white px-4 py-3 text-sm font-medium transition hover:bg-primary-soft"
+              className="w-full rounded-[1.5rem] border border-border bg-surface px-4 py-3 text-sm font-medium text-text transition hover:bg-primary-soft"
             >
               Sair
             </button>
@@ -106,16 +133,22 @@ export function StatCard({
 }) {
   const toneMap = {
     default: 'bg-surface',
-    success: 'bg-emerald-50',
-    warning: 'bg-amber-50',
+    success: 'bg-emerald-50 text-slate-950',
+    warning: 'bg-amber-50 text-slate-950',
     dark: 'bg-[var(--theme-surface-alt)]'
   };
 
   return (
     <div className={cn('rounded-[1.75rem] border border-border p-5 shadow-soft', toneMap[tone])}>
-      <p className="text-sm text-muted">{label}</p>
-      <p className="mt-3 text-3xl font-semibold text-text">{value}</p>
-      {hint ? <p className="mt-2 text-xs leading-5 text-muted">{hint}</p> : null}
+      <p className={cn('text-sm', tone === 'default' || tone === 'dark' ? 'text-muted' : 'text-slate-600')}>{label}</p>
+      <p className={cn('mt-3 text-3xl font-semibold', tone === 'default' || tone === 'dark' ? 'text-text' : 'text-slate-950')}>
+        {value}
+      </p>
+      {hint ? (
+        <p className={cn('mt-2 text-xs leading-5', tone === 'default' || tone === 'dark' ? 'text-muted' : 'text-slate-600')}>
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }
