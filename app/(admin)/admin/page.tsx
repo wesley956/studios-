@@ -190,8 +190,8 @@ export default async function AdminDashboard() {
         description="Aqui você acompanha a saúde da plataforma, a mensalidade do seu sistema e quem precisa de contato ou ação."
         action={
           <div className="flex flex-wrap gap-3">
-            <Link href="/admin/clientes/novo" className="rounded-2xl bg-primary px-5 py-3 text-white transition hover:opacity-90">
-              Criar novo cliente
+            <Link href="/admin/clientes" className="rounded-2xl bg-primary px-5 py-3 text-white transition hover:opacity-90">
+              Ver lista de clientes
             </Link>
             <Link href="/admin/financeiro" className="rounded-2xl border border-border bg-white px-5 py-3 transition hover:bg-primary-soft">
               Assinaturas
