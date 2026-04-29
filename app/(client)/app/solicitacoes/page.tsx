@@ -1,14 +1,21 @@
 import { approveBookingRequest, cancelBookingRequest } from '@/actions/client-bookings';
 import { Field, Input, SubmitButton, DangerButton } from '@/components/shared/forms';
-import { EmptyState, SectionCard, StatusBadge, TopHeading } from '@/components/shared/shell';
+import { EmptyState, StatusBadge, TopHeading } from '@/components/shared/shell';
 import { createClient } from '@/lib/supabase/server';
 import { getCurrentBusiness, requireClientOwner } from '@/lib/auth';
-import { currencyBRL, formatDateBR, formatTime, statusLabel } from '@/lib/utils';
+import { formatDateBR, formatTime, statusLabel } from '@/lib/utils';
 
-export default async function SolicitacoesPage() {
+export default async function SolicitacoesPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ success?: string; error?: string }>;
+}) {
   await requireClientOwner();
   const business = await getCurrentBusiness();
   const supabase = await createClient();
+  const params = searchParams ? await searchParams : undefined;
+  const successMessage = typeof params?.success === 'string' ? params.success : null;
+  const errorMessage = typeof params?.error === 'string' ? params.error : null;
 
   const { data: requests } = await supabase
     .from('booking_requests')
@@ -29,6 +36,18 @@ export default async function SolicitacoesPage() {
   return (
     <div>
       <TopHeading title="Solicitações" description="Aprove, ajuste data e horário, defina valor final e transforme pedidos públicos em agenda confirmada." />
+
+      {successMessage ? (
+        <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">
+          {successMessage}
+        </div>
+      ) : null}
+
+      {errorMessage ? (
+        <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+          {errorMessage}
+        </div>
+      ) : null}
 
       <div className="space-y-4">
         {requests?.length ? requests.map((item) => (
