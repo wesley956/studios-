@@ -1,10 +1,34 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { calculateEndTime, appointmentsOverlap, isWithinBusinessHours } from '@/lib/schedule';
 import { getCurrentBusiness } from '@/lib/auth';
 import { parseMoney } from '@/lib/utils';
+
+const SOLICITACOES_PATH = '/app/solicitacoes';
+const AGENDA_PATH = '/app/agenda';
+
+function buildRedirectUrl(path: string, key: 'success' | 'error', message: string) {
+  return `${path}${path.includes('?') ? '&' : '?'}${key}=${encodeURIComponent(message)}`;
+}
+
+function failOnSolicitacoes(message: string): never {
+  redirect(buildRedirectUrl(SOLICITACOES_PATH, 'error', message));
+}
+
+function successOnSolicitacoes(message: string): never {
+  redirect(buildRedirectUrl(SOLICITACOES_PATH, 'success', message));
+}
+
+function failOnAgenda(message: string): never {
+  redirect(buildRedirectUrl(AGENDA_PATH, 'error', message));
+}
+
+function successOnAgenda(message: string): never {
+  redirect(buildRedirectUrl(AGENDA_PATH, 'success', message));
+}
 
 async function getBusinessContext(businessId: string, date: string) {
   const supabase = await createClient();
@@ -30,7 +54,7 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
   const requestId = String(formData.get('requestId') || '');
 
   if (!requestId) {
-    throw new Error('Solicitação inválida.');
+    failOnSolicitacoes('Solicitação inválida. Atualize a página e tente novamente.');
   }
 
   const supabase = await createClient();
@@ -42,15 +66,23 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
     .single();
 
   if (requestError || !request) {
-    throw new Error('Solicitação não encontrada.');
+    failOnSolicitacoes('Solicitação não encontrada. Ela pode ter sido removida ou alterada.');
   }
 
-  const { data: service } = await supabase
+  if (request.status !== 'pending') {
+    failOnSolicitacoes('Essa solicitação já foi analisada. Atualize a página para ver o status atual.');
+  }
+
+  const { data: service, error: serviceError } = await supabase
     .from('services')
     .select('id, price, duration_minutes')
     .eq('id', request.service_id)
     .eq('business_id', business.id)
     .maybeSingle();
+
+  if (serviceError) {
+    failOnSolicitacoes(`Erro ao buscar o serviço da solicitação: ${serviceError.message}`);
+  }
 
   const confirmedDate = String(formData.get('confirmedDate') || request.requested_date);
   const confirmedTime = String(formData.get('confirmedTime') || request.requested_time).slice(0, 5);
@@ -61,24 +93,29 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
   const { appointments, businessHours } = await getBusinessContext(business.id, confirmedDate);
 
   if (!isWithinBusinessHours({ date: confirmedDate, time: confirmedTime, durationMinutes, hours: businessHours })) {
-    throw new Error('O horário escolhido está fora do funcionamento configurado.');
+    failOnSolicitacoes('O horário escolhido está fora do funcionamento configurado. Escolha outro horário.');
   }
 
   if (appointmentsOverlap({ date: confirmedDate, startTime: confirmedTime, endTime, appointments })) {
-    throw new Error('Já existe outro atendimento nesse horário. Escolha outro horário para aprovar.');
+    failOnSolicitacoes('Já existe outro atendimento nesse horário. Escolha outro horário para aprovar esta solicitação.');
   }
 
   let customerId: string | null = null;
 
-  const { data: existingCustomer } = await supabase
+  const { data: existingCustomers, error: existingCustomerError } = await supabase
     .from('customers')
     .select('id')
     .eq('business_id', business.id)
     .eq('phone', request.customer_phone)
-    .maybeSingle();
+    .order('created_at', { ascending: true })
+    .limit(1);
 
-  if (existingCustomer?.id) {
-    customerId = existingCustomer.id;
+  if (existingCustomerError) {
+    failOnSolicitacoes(`Erro ao verificar cliente existente: ${existingCustomerError.message}`);
+  }
+
+  if (existingCustomers?.[0]?.id) {
+    customerId = existingCustomers[0].id;
   } else {
     const { data: newCustomer, error: customerError } = await supabase
       .from('customers')
@@ -91,7 +128,7 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
       .single();
 
     if (customerError || !newCustomer) {
-      throw new Error('Não foi possível criar a cliente.');
+      failOnSolicitacoes(customerError?.message || 'Não foi possível criar a cliente.');
     }
 
     customerId = newCustomer.id;
@@ -118,7 +155,7 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
     .single();
 
   if (appointmentError || !appointment) {
-    throw new Error(appointmentError?.message || 'Não foi possível criar o agendamento.');
+    failOnSolicitacoes(appointmentError?.message || 'Não foi possível criar o agendamento.');
   }
 
   const { error: updateError } = await supabase
@@ -129,15 +166,23 @@ export async function approveBookingRequest(formData: FormData): Promise<void> {
       approved_date: confirmedDate,
       approved_time: confirmedTime
     })
-    .eq('id', request.id);
+    .eq('id', request.id)
+    .eq('business_id', business.id);
 
   if (updateError) {
-    throw new Error(updateError.message);
+    await supabase
+      .from('appointments')
+      .delete()
+      .eq('id', appointment.id)
+      .eq('business_id', business.id);
+
+    failOnSolicitacoes(`O agendamento foi criado, mas a solicitação não foi atualizada: ${updateError.message}`);
   }
 
   revalidatePath('/app/solicitacoes');
   revalidatePath('/app/agenda');
   revalidatePath('/app');
+  successOnSolicitacoes('Solicitação aprovada e agendamento criado com sucesso.');
 }
 
 export async function cancelBookingRequest(formData: FormData): Promise<void> {
@@ -145,7 +190,7 @@ export async function cancelBookingRequest(formData: FormData): Promise<void> {
   const requestId = String(formData.get('requestId') || '');
 
   if (!requestId) {
-    throw new Error('Solicitação inválida.');
+    failOnSolicitacoes('Solicitação inválida. Atualize a página e tente novamente.');
   }
 
   const supabase = await createClient();
@@ -159,11 +204,12 @@ export async function cancelBookingRequest(formData: FormData): Promise<void> {
     .eq('business_id', business.id);
 
   if (error) {
-    throw new Error(error.message);
+    failOnSolicitacoes(error.message);
   }
 
   revalidatePath('/app/solicitacoes');
   revalidatePath('/app');
+  successOnSolicitacoes('Solicitação recusada com sucesso.');
 }
 
 export async function updateAppointmentStatus(formData: FormData): Promise<void> {
@@ -172,7 +218,7 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
   const status = String(formData.get('status') || '');
 
   if (!appointmentId || !['confirmed', 'completed', 'cancelled', 'no_show'].includes(status)) {
-    throw new Error('Agendamento inválido.');
+    failOnAgenda('Agendamento inválido. Atualize a página e tente novamente.');
   }
 
   const supabase = await createClient();
@@ -184,14 +230,18 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
     .single();
 
   if (appointmentError || !appointment) {
-    throw new Error('Agendamento não encontrado.');
+    failOnAgenda('Agendamento não encontrado. Ele pode ter sido removido ou alterado.');
   }
 
-  const { data: existingPayment } = await supabase
+  const { data: existingPayment, error: existingPaymentError } = await supabase
     .from('payments')
     .select('id, paid_at')
     .eq('appointment_id', appointment.id)
     .maybeSingle();
+
+  if (existingPaymentError) {
+    failOnAgenda(`Erro ao verificar pagamento existente: ${existingPaymentError.message}`);
+  }
 
   const nextDate = String(formData.get('appointmentDate') || appointment.appointment_date);
   const nextTime = String(formData.get('appointmentTime') || appointment.appointment_time).slice(0, 5);
@@ -220,7 +270,7 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
     const { appointments, businessHours } = await getBusinessContext(business.id, nextDate);
 
     if (!isWithinBusinessHours({ date: nextDate, time: nextTime, durationMinutes, hours: businessHours })) {
-      throw new Error('O horário informado está fora do funcionamento.');
+      failOnAgenda('O horário informado está fora do funcionamento. Escolha outro horário.');
     }
 
     if (
@@ -232,7 +282,7 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
         ignoreAppointmentId: appointment.id
       })
     ) {
-      throw new Error('Já existe um agendamento nesse horário.');
+      failOnAgenda('Já existe um agendamento nesse horário. Escolha outro horário.');
     }
   }
 
@@ -270,7 +320,7 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
     .eq('business_id', business.id);
 
   if (error) {
-    throw new Error(error.message);
+    failOnAgenda(error.message);
   }
 
   const shouldSyncPayment = status === 'completed' || paidAmount > 0 || Boolean(existingPayment?.id);
@@ -298,13 +348,13 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
         .eq('id', existingPayment.id);
 
       if (paymentUpdateError) {
-        throw new Error(paymentUpdateError.message);
+        failOnAgenda(paymentUpdateError.message);
       }
     } else {
       const { error: paymentInsertError } = await supabase.from('payments').insert(paymentPayload);
 
       if (paymentInsertError) {
-        throw new Error(paymentInsertError.message);
+        failOnAgenda(paymentInsertError.message);
       }
     }
   }
@@ -313,4 +363,5 @@ export async function updateAppointmentStatus(formData: FormData): Promise<void>
   revalidatePath('/app');
   revalidatePath('/app/financeiro');
   revalidatePath('/app/clientes');
+  successOnAgenda('Agendamento atualizado com sucesso.');
 }
