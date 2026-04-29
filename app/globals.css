@@ -118,3 +118,67 @@ textarea::placeholder {
   background-size: 18px 18px;
   background-position: 0 0, 9px 9px;
 }
+
+.admin-theme {
+  --theme-bg: #07111f;
+  --theme-surface: #101b2e;
+  --theme-surface-alt: #162640;
+  --theme-text: #eef6ff;
+  --theme-muted: #a9bad0;
+  --theme-primary: #22d3ee;
+  --theme-primary-soft: #0f2a3d;
+  --theme-border: #263a55;
+  --theme-accent: #38bdf8;
+  --theme-ring: #22d3ee;
+
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(34, 211, 238, 0.16), transparent 34rem),
+    radial-gradient(circle at bottom right, rgba(59, 130, 246, 0.12), transparent 30rem),
+    linear-gradient(135deg, #07111f 0%, #0b1627 45%, #0f172a 100%);
+  color: var(--theme-text);
+}
+
+.admin-theme h1,
+.admin-theme h2,
+.admin-theme h3,
+.admin-theme h4 {
+  font-family: var(--font-inter), sans-serif;
+  letter-spacing: -0.035em;
+}
+
+.admin-theme .shadow-soft {
+  box-shadow: 0 24px 70px -34px rgba(0, 0, 0, 0.75);
+}
+
+.admin-theme input,
+.admin-theme select,
+.admin-theme textarea {
+  background: #0b1625;
+  color: var(--theme-text);
+}
+
+.admin-theme input::placeholder,
+.admin-theme textarea::placeholder {
+  color: #7f93ad;
+}
+
+.admin-theme .bg-white {
+  background-color: #0b1625 !important;
+}
+
+.admin-theme .admin-command-strip {
+  background:
+    linear-gradient(135deg, rgba(34, 211, 238, 0.16), rgba(96, 165, 250, 0.08)),
+    rgba(11, 22, 37, 0.92);
+}
+
+.admin-theme .admin-nav-item:hover {
+  background: rgba(34, 211, 238, 0.1);
+}
+
+.admin-theme .admin-nav-number {
+  background: rgba(34, 211, 238, 0.12);
+  color: #67e8f9;
+  border-color: rgba(34, 211, 238, 0.32);
+}
