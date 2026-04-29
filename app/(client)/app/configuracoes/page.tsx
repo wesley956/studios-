@@ -8,17 +8,35 @@ import { BUSINESS_TYPE_OPTIONS, THEME_OPTIONS, getSuggestedThemeByBusinessType }
 
 const weekdays = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 
-export default async function ConfiguracoesPage() {
+type ConfiguracoesPageProps = {
+  searchParams?: Promise<{
+    saved?: string;
+    error?: string;
+  }>;
+};
+
+export default async function ConfiguracoesPage({ searchParams }: ConfiguracoesPageProps) {
   await requireClientOwner();
+
+  const params = searchParams ? await searchParams : undefined;
+  const saved = params?.saved === '1';
+  const errorMessage = typeof params?.error === 'string' ? params.error : null;
 
   const business = await getCurrentBusiness();
   const supabase = await createClient();
 
-  const { data: businessHours } = await supabase
-    .from('business_hours')
-    .select('*')
-    .eq('business_id', business.id)
-    .order('day_of_week');
+  const [{ data: businessHours }, { data: galleryImages }] = await Promise.all([
+    supabase
+      .from('business_hours')
+      .select('*')
+      .eq('business_id', business.id)
+      .order('day_of_week'),
+    supabase
+      .from('gallery_images')
+      .select('*')
+      .eq('business_id', business.id)
+      .order('sort_order', { ascending: true })
+  ]);
 
   async function handleUpdateBusinessSettings(formData: FormData): Promise<void> {
     'use server';
@@ -29,6 +47,10 @@ export default async function ConfiguracoesPage() {
     (defaultHour) => businessHours?.find((item) => item.day_of_week === defaultHour.day_of_week) || defaultHour
   );
 
+  const gallerySlots = [0, 1, 2].map((index) =>
+    galleryImages?.find((item) => Number(item.sort_order) === index) || null
+  );
+
   return (
     <div>
       <TopHeading
@@ -36,7 +58,19 @@ export default async function ConfiguracoesPage() {
         description="Edite as informações do studio, defina o tipo do negócio, ajuste o tema visual e organize as regras da agenda."
       />
 
-      <form action={handleUpdateBusinessSettings} className="space-y-6">
+      {saved && (
+        <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">
+          Configurações salvas com sucesso. A página pública já foi atualizada.
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+          {errorMessage}
+        </div>
+      )}
+
+      <form action={handleUpdateBusinessSettings} className="space-y-6" encType="multipart/form-data">
         <SectionCard
           title="Informações principais"
           description="Esses dados aparecem no painel e alimentam a página pública."
@@ -89,37 +123,110 @@ export default async function ConfiguracoesPage() {
               <Input name="address" defaultValue={business.address || ''} />
             </Field>
 
-            <Field label="Tagline" className="md:col-span-2" hint="Frase curta de destaque do seu negócio.">
+            <Field label="Frase de destaque" className="md:col-span-2" hint="Frase curta que aparece logo no topo da página pública.">
               <Input name="tagline" defaultValue={business.tagline || ''} />
             </Field>
 
-            <Field label="Descrição" className="md:col-span-2">
+            <Field label="Descrição do negócio" className="md:col-span-2">
               <Textarea name="description" rows={4} defaultValue={business.description || ''} />
             </Field>
           </div>
         </SectionCard>
 
         <SectionCard
-          title="Identidade pública"
-          description="Essas informações ajudam a página pública a ficar mais completa e profissional."
+          title="Fotos da página pública"
+          description="Envie imagens direto do computador ou celular. Não precisa mais colar URL."
         >
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label="Logo (URL)">
-              <Input name="logoUrl" defaultValue={business.logo_url || ''} placeholder="https://..." />
-            </Field>
-
-            <Field label="Capa (URL)">
-              <Input name="coverUrl" defaultValue={business.cover_url || ''} placeholder="https://..." />
+          <div className="grid gap-5 md:grid-cols-2">
+            <Field
+              label="Logo"
+              hint="Imagem quadrada ou com pouco texto. Formatos: JPG, PNG, WEBP ou GIF. Máximo: 5 MB."
+            >
+              <div className="rounded-2xl border border-border bg-[var(--theme-surface-alt)] p-4">
+                {business.logo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={business.logo_url}
+                    alt="Logo atual"
+                    className="mb-4 h-24 w-24 rounded-2xl object-cover"
+                  />
+                ) : (
+                  <p className="mb-4 text-sm text-muted">Nenhuma logo enviada ainda.</p>
+                )}
+                <Input name="logoFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+              </div>
             </Field>
 
             <Field
-              label="Observação pública"
-              className="md:col-span-2"
-              hint="Ex.: atendimento mediante confirmação, estacionamento, política de atraso."
+              label="Capa"
+              hint="Foto horizontal para o topo da página. Formatos: JPG, PNG, WEBP ou GIF. Máximo: 5 MB."
             >
-              <Textarea name="publicNote" rows={3} defaultValue={business.public_note || ''} />
+              <div className="rounded-2xl border border-border bg-[var(--theme-surface-alt)] p-4">
+                {business.cover_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={business.cover_url}
+                    alt="Capa atual"
+                    className="mb-4 h-36 w-full rounded-2xl object-cover"
+                  />
+                ) : (
+                  <p className="mb-4 text-sm text-muted">Nenhuma capa enviada ainda.</p>
+                )}
+                <Input name="coverFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+              </div>
             </Field>
           </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Galeria da página pública"
+          description="Adicione até 3 fotos para mostrar ambiente, resultados, equipe ou detalhes do atendimento."
+        >
+          <div className="grid gap-5 md:grid-cols-3">
+            {gallerySlots.map((image, index) => (
+              <div key={index} className="rounded-2xl border border-border bg-[var(--theme-surface-alt)] p-4">
+                <p className="text-sm font-medium text-text">Foto {index + 1}</p>
+
+                {image?.image_url ? (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={image.image_url}
+                      alt={`Foto ${index + 1} da galeria`}
+                      className="mt-3 h-40 w-full rounded-2xl object-cover"
+                    />
+                    <label className="mt-3 flex items-center gap-2 text-sm text-muted">
+                      <input type="checkbox" name={`removeGallery_${index}`} />
+                      Remover foto atual
+                    </label>
+                  </>
+                ) : (
+                  <div className="mt-3 flex h-40 items-center justify-center rounded-2xl border border-dashed border-border p-4 text-center text-sm text-muted">
+                    Nenhuma foto enviada.
+                  </div>
+                )}
+
+                <Input
+                  name={`galleryFile_${index}`}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="mt-4"
+                />
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Observação pública"
+          description="Use esse campo para mostrar uma informação realmente útil para a cliente antes de agendar."
+        >
+          <Field
+            label="Aviso para clientes"
+            hint="Ex.: atendimento mediante confirmação, tolerância de atraso, estacionamento, sinal para reserva."
+          >
+            <Textarea name="publicNote" rows={3} defaultValue={business.public_note || ''} />
+          </Field>
         </SectionCard>
 
         <SectionCard
@@ -127,10 +234,12 @@ export default async function ConfiguracoesPage() {
           description="Defina antecedência mínima, intervalo entre horários e quantos dias podem ser abertos na agenda pública."
         >
           <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Intervalo entre slots (min)">
+            <Field label="Intervalo entre horários (min)">
               <Input
                 name="bookingIntervalMinutes"
                 type="number"
+                min={5}
+                step={5}
                 defaultValue={business.booking_interval_minutes || 15}
               />
             </Field>
@@ -139,6 +248,7 @@ export default async function ConfiguracoesPage() {
               <Input
                 name="bookingWindowDays"
                 type="number"
+                min={1}
                 defaultValue={business.booking_window_days || 30}
               />
             </Field>
@@ -147,6 +257,7 @@ export default async function ConfiguracoesPage() {
               <Input
                 name="bookingLeadTimeHours"
                 type="number"
+                min={0}
                 defaultValue={business.booking_lead_time_hours || 2}
               />
             </Field>
@@ -155,7 +266,7 @@ export default async function ConfiguracoesPage() {
 
         <SectionCard
           title="Horários de funcionamento"
-          description="A agenda pública só oferece horários dentro da faixa marcada como aberta."
+          description="Esses dias e horários aparecem na página pública e também controlam a agenda disponível."
         >
           <div className="space-y-4">
             {hours.map((hour) => (
