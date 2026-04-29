@@ -17,7 +17,7 @@ function getBadgeTone(status: string) {
 export default async function AgendaPage({
   searchParams
 }: {
-  searchParams?: Promise<{ status?: string; date?: string }>;
+  searchParams?: Promise<{ status?: string; date?: string; success?: string; error?: string }>;
 }) {
   await requireClientOwner();
   const business = await getCurrentBusiness();
@@ -26,6 +26,8 @@ export default async function AgendaPage({
 
   const selectedStatus = params?.status || '';
   const selectedDate = params?.date || '';
+  const successMessage = typeof params?.success === 'string' ? params.success : null;
+  const errorMessage = typeof params?.error === 'string' ? params.error : null;
 
   let query = supabase
     .from('appointments')
@@ -50,6 +52,18 @@ export default async function AgendaPage({
         title="Agenda"
         description="Gerencie horários, conclua atendimentos com pagamento em 1 clique e acompanhe o que ainda está pendente."
       />
+
+      {successMessage ? (
+        <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">
+          {successMessage}
+        </div>
+      ) : null}
+
+      {errorMessage ? (
+        <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+          {errorMessage}
+        </div>
+      ) : null}
 
       <SectionCard title="Filtros" description="Refine a agenda por status ou data específica.">
         <form className="grid gap-4 md:grid-cols-[220px,220px,auto] md:items-end">
